@@ -209,6 +209,14 @@ function orderStatusBadge(status, index = null) {
         );
     }
 
+    if (normalized === 'archived') {
+        return (
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                Archived
+            </span>
+        );
+    }
+
     if (index === 0) {
         return (
             <span className="inline-flex items-center rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-rose-700">
@@ -1170,9 +1178,7 @@ function OrderHistory({ mode }) {
     const [currentPage, setCurrentPage] = React.useState(1);
 
     React.useEffect(() => {
-    // If your backend isn't set up to handle { status: [...] }, 
-    // it might be failing. Try sending no params first to test.
-    const params = { history: true }; 
+    const params = { history: true };
 
     window.axios
         .get('/api/orders', { params })
@@ -1186,13 +1192,17 @@ function OrderHistory({ mode }) {
 
     const visibleOrders = React.useMemo(() => {
     return orders.filter((order) => {
-        const status = order.status?.toLowerCase(); // Standardize to lowercase
-        
+        const status = order.status?.toLowerCase();
+
         if (statusFilter === 'completed') {
             return status === 'done' || status === 'completed';
         }
 
-        return status === 'cancelled' || status === 'canceled';
+        if (statusFilter === 'cancelled') {
+            return status === 'cancelled' || status === 'canceled';
+        }
+
+        return status === 'archived';
     });
     }, [orders, statusFilter]);
 
@@ -1212,6 +1222,7 @@ function OrderHistory({ mode }) {
     const filterOptions = [
     { id: 'completed', label: 'Completed' },
     { id: 'cancelled', label: 'Cancelled' },
+    { id: 'archived', label: 'Archived' },
     ];
 
     return (
@@ -1390,6 +1401,24 @@ function OrderHistory({ mode }) {
                                     >
                                         Print Order Slip
                                     </button>
+                                {o.status !== 'archived' && (
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            try {
+                                                const r = await window.axios.patch(`/api/orders/${o.id}/status`, {
+                                                    status: 'archived',
+                                                });
+                                                setOrders((prev) => prev.map((order) => (order.id === o.id ? r.data : order)));
+                                            } catch (e) {
+                                                setError('Unable to archive order.');
+                                            }
+                                        }}
+                                        className="w-full rounded-2xl border border-slate-200 bg-white py-3 text-[11px] font-black text-slate-900 shadow-sm transition-all active:scale-95 hover:bg-slate-50"
+                                    >
+                                        Archive Order
+                                    </button>
+                                )}
                                 </div>
                             </div>
                         ))}

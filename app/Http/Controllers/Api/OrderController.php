@@ -27,7 +27,8 @@ class OrderController extends Controller
                 return $q->where('status', $status);
             })
             ->when($active, fn ($q) => $q->whereIn('status', ['new', 'in_progress']))
-            ->when($date, fn ($q, $date) => $q->whereDate('completed_at', $date));
+            ->when($date, fn ($q, $date) => $q->whereDate('completed_at', $date))
+            ->when($analytics, fn ($q) => $q->where('status', '!=', 'archived'));
 
         if (! $analytics) {
             $query->limit(200);
@@ -103,7 +104,7 @@ class OrderController extends Controller
     public function updateStatus(Request $request, Order $order)
     {
         $data = $request->validate([
-            'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled'],
+            'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled,archived'],
             'note' => ['sometimes', 'nullable', 'string', 'max:2000'],
         ]);
 
@@ -120,7 +121,7 @@ class OrderController extends Controller
 
             if ($data['status'] === 'done') {
                 $update['completed_at'] = now();
-            } else {
+            } elseif ($data['status'] === 'cancelled') {
                 $update['completed_at'] = null;
             }
         }
