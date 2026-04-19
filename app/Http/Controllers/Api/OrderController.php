@@ -15,8 +15,10 @@ class OrderController extends Controller
     {
         $status = $request->query('status');
         $active = $request->boolean('active');
+        $analytics = $request->boolean('analytics');
+        $date = $request->query('date');
 
-        return Order::query()
+        $query = Order::query()
             ->when($status, function ($q, $status) {
                 if (is_array($status)) {
                     return $q->whereIn('status', $status);
@@ -25,9 +27,15 @@ class OrderController extends Controller
                 return $q->where('status', $status);
             })
             ->when($active, fn ($q) => $q->whereIn('status', ['new', 'in_progress']))
+            ->when($date, fn ($q, $date) => $q->whereDate('completed_at', $date));
+
+        if (! $analytics) {
+            $query->limit(200);
+        }
+
+        return $query
             ->with(['items.product'])
             ->orderByDesc('id')
-            ->limit(200)
             ->get();
     }
 

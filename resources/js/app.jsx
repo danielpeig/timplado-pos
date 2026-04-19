@@ -1,7 +1,7 @@
 import './bootstrap';
-import { Printer, X } from 'lucide-react';
+import { Printer, X, ArrowUp, ArrowDown } from 'lucide-react';
 
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 
@@ -1425,6 +1425,646 @@ function OrderHistory({ mode }) {
     );
 }
 
+function KitchenAnalytics() {
+    const [activeFilter, setActiveFilter] = useState('Overall');
+    const [selectedDate, setSelectedDate] = useState('');
+    const [orders, setOrders] = useState([]);
+    const [products, setProducts] = useState([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState(null);
+    const [activePayment, setActivePayment] = useState('cash');
+    const [showPaymentModal, setShowPaymentModal] = useState(false);
+    const [inventorySort, setInventorySort] = useState({ field: 'qtySold', direction: 'desc' });
+    const [categorySortDirection, setCategorySortDirection] = useState('asc');
+    const dateInputRef = useRef(null);
+
+    const openDatePicker = () => {
+        setActiveFilter('Custom');
+        if (dateInputRef.current) {
+            if (typeof dateInputRef.current.showPicker === 'function') {
+                dateInputRef.current.showPicker();
+            } else {
+                dateInputRef.current.focus();
+            }
+        }
+    };
+
+    const formatDisplayDate = (isoDate) => {
+        if (!isoDate) return 'MM/DD/YYYY';
+        const date = new Date(isoDate);
+        if (Number.isNaN(date.getTime())) return 'Invalid date';
+        return date.toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+        });
+    };
+
+    const fetchProducts = async () => {
+        const response = await window.axios.get('/api/products/manage');
+        setProducts(response.data);
+    };
+
+    const fetchOrders = async () => {
+        setIsLoading(true);
+        setError(null);
+
+        const params = {
+            analytics: true,
+        };
+
+        if (activeFilter === 'Custom' && selectedDate) {
+            params.date = selectedDate;
+        }
+
+        try {
+            const response = await window.axios.get('/api/orders', { params });
+            setOrders(response.data);
+        } catch (e) {
+            setError('Unable to load analytics data.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    React.useEffect(() => {
+        fetchProducts().catch(() => {});
+    }, []);
+
+    React.useEffect(() => {
+        fetchOrders();
+    }, [activeFilter, selectedDate]);
+
+    const completedOrders = orders.filter((order) => order.status === 'done' || order.status === 'completed');
+    const cancelledOrders = orders.filter((order) => order.status === 'cancelled');
+    
+    const orderItems = completedOrders.flatMap((order) =>
+        (order.items ?? []).map((item) => ({
+            ...item,
+            orderCompletedAt: order.completed_at,
+            paymentMode: order.payment_mode,
+        })),
+    );
+
+    const grossRevenue = orderItems.reduce(
+        (sum, item) => sum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+        0,
+    );
+
+    const ordersProcessed = completedOrders.length;
+    const cancelledOrdersCount = cancelledOrders.length;
+
+    const hourlyLabels = [9, 10, 11, 12, 13];
+    const hourlySales = hourlyLabels.map((hour) => {
+        const total = completedOrders.reduce((sum, order) => {
+            const completedAt = order.completed_at ? new Date(order.completed_at) : null;
+            if (!completedAt || completedAt.getHours() !== hour) return sum;
+
+            return sum + (order.items ?? []).reduce(
+                (itemSum, item) => itemSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+                0,
+            );
+        }, 0);
+
+        return {
+            time: `${hour === 12 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}`,
+            amount: total,
+        };
+    });
+
+    const topFavorites = Object.values(
+        orderItems.reduce((acc, item) => {
+            const product = item.product;
+            if (!product || product.category === 'Add Ons') return acc;
+
+            const key = product.id;
+            acc[key] = acc[key] || {
+                id: product.id,
+                name: product.name,
+                qty: 0,
+                revenue: 0,
+            };
+
+            acc[key].qty += item.quantity ?? 0;
+            acc[key].revenue += (product.price_pesos ?? 0) * (item.quantity ?? 0);
+            return acc;
+        }, {}),
+    )
+        .sort((a, b) => b.qty - a.qty)
+        .slice(0, 5);
+
+    const paymentBreakdown = ['cash', 'gcash'].map((method) => {
+        const ordersByMethod = completedOrders.filter((order) => order.payment_mode === method);
+        const cancelledByMethod = cancelledOrders.filter((order) => order.payment_mode === method);
+        
+        const total = ordersByMethod.reduce(
+            (sum, order) =>
+                sum + (order.items ?? []).reduce(
+                    (orderSum, item) => orderSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+                    0,
+                ),
+            0,
+        );
+        
+        const refundAmount = cancelledByMethod.reduce(
+            (sum, order) =>
+                sum + (order.items ?? []).reduce(
+                    (orderSum, item) => orderSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+                    0,
+                ),
+            0,
+        );
+        
+        const netAmount = total - refundAmount;
+
+        return {
+            method,
+            count: ordersByMethod.length,
+            total,
+            cancelledCount: cancelledByMethod.length,
+            refundAmount,
+            netAmount,
+        };
+    });
+
+    const inventoryRows = products
+        .map((product) => {
+            const qtySold = orderItems
+                .filter((item) => item.product_id === product.id)
+                .reduce((sum, item) => sum + (item.quantity ?? 0), 0);
+            const netSales = qtySold * (product.price_pesos ?? 0);
+
+            return {
+                ...product,
+                qtySold,
+                netSales,
+                netProfit: netSales,
+            };
+        })
+        .filter((product) => product.qtySold > 0);
+
+    const sortedInventoryRows = [...inventoryRows].sort((a, b) => {
+        if (inventorySort.field === 'category') {
+            const result = (a.category ?? '').localeCompare(b.category ?? '');
+            return inventorySort.direction === 'asc' ? result : -result;
+        }
+
+        const valueA = a[inventorySort.field] ?? 0;
+        const valueB = b[inventorySort.field] ?? 0;
+        return inventorySort.direction === 'asc' ? valueA - valueB : valueB - valueA;
+    });
+
+    const selectedDateLabel = activeFilter === 'Custom'
+        ? selectedDate ? formatDisplayDate(selectedDate) : 'Pick a date'
+        : 'Overall';
+
+    const exportToCSV = () => {
+    if (sortedInventoryRows.length === 0) {
+        alert('No data available to export.');
+        return;
+    }
+
+        // 1. Create Report Metadata (The "Magic" professional touch)
+        const reportTitle = [['TIMPLADO BUSINESS INSIGHTS REPORT']];
+        const reportDate = [['Filter Range:', selectedDateLabel]];
+        const reportGenerated = [['Generated On:', new Date().toLocaleString()]];
+        const summaryHeader = [['Total Items Sold', 'Total Gross Revenue']];
+        const summaryData = [[
+            sortedInventoryRows.reduce((sum, i) => sum + i.qtySold, 0),
+            currencyFromPesos(grossRevenue)
+        ]];
+        const spacer = [[]]; // Empty rows for breathing room
+
+        // 2. Main Table Headers
+        const headers = ['Item Name', 'Category', 'Qty Sold', 'Net Sales', 'Net Profit'];
+
+        // 3. Main Table Rows
+        const rows = sortedInventoryRows.map(item => [
+            item.name,
+            item.category ?? 'Uncategorized',
+            item.qtySold,
+            currencyFromPesos(item.netSales),
+            currencyFromPesos(item.netProfit)
+        ]);
+
+        // 4. Combine everything into one big array
+        const csvArray = [
+            ...reportTitle,
+            ...reportDate,
+            ...reportGenerated,
+            ...spacer,
+            ...summaryHeader,
+            ...summaryData,
+            ...spacer,
+            ['DETAILED BREAKDOWN'], // Section title
+            headers,
+            ...rows
+        ];
+
+        // 5. Convert to CSV string with double-quote protection
+        const csvContent = '\uFEFF' + csvArray
+            .map(row => row.map(field => {
+                // Escape double quotes and wrap field in quotes
+                const stringField = String(field).replace(/"/g, '""');
+                return `"${stringField}"`;
+            }).join(','))
+            .join('\r\n');
+
+        // 6. Trigger Download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        
+        // Clean filename logic
+        const fileDate = new Date().toISOString().split('T')[0];
+        const fileName = `timplado-report-${selectedDateLabel.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${fileDate}.csv`;
+
+        link.setAttribute('href', url);
+        link.setAttribute('download', fileName);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    return (
+        <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col font-sans">
+            <header className="flex-none sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur-md px-6 py-4">
+                <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-8">
+                    <div className="flex items-center gap-4">
+                        <ButtonLink to="/kitchen" className="text-slate-500 hover:text-slate-900 transition-colors">
+                            <span className="text-lg">←</span>
+                        </ButtonLink>
+                        <div className="flex items-center gap-4">
+                            <img src="/images/logo.png" alt="Logo" className="h-12 w-auto" />
+                            <div>
+                                <h1 className="text-2xl font-black tracking-tight text-slate-800 leading-none">Timplado Analytics</h1>
+                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Financial Sales Tracking</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/50">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setActiveFilter('Overall');
+                                setSelectedDate('');
+                            }}
+                            className={`px-6 py-2 text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all duration-300 border ${
+                                activeFilter === 'Overall'
+                                    ? 'bg-white shadow-md text-slate-900 border-slate-100'
+                                    : 'border-transparent text-slate-400 hover:text-slate-600'
+                            }`}
+                        >
+                            Overall
+                        </button>
+
+                        <div className="h-6 w-[1px] bg-slate-300/40 mx-1" />
+
+                        <div
+                            onClick={openDatePicker}
+                            className={`flex items-center gap-4 px-4 py-2 rounded-xl transition-all duration-300 cursor-pointer group border ${
+                                activeFilter === 'Custom'
+                                    ? 'bg-white shadow-sm border-emerald-100 ring-1 ring-emerald-500/10'
+                                    : 'border-transparent hover:bg-slate-200/50'
+                            }`}
+                        >
+                            <div className="flex flex-col items-end">
+                                <span className={`text-[8px] font-black uppercase tracking-tighter leading-none mb-1 transition-colors ${
+                                    activeFilter === 'Custom' ? 'text-emerald-600' : 'text-slate-400'
+                                }`}>
+                                    {activeFilter === 'Custom' ? 'Selected Date' : 'Pick Date'}
+                                </span>
+                                <input
+                                    ref={dateInputRef}
+                                    type="date"
+                                    value={selectedDate}
+                                    className={`bg-transparent text-sm font-black outline-none cursor-pointer transition-colors uppercase ${
+                                        activeFilter === 'Custom' ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-600'
+                                    }`}
+                                    onChange={(e) => {
+                                        setActiveFilter('Custom');
+                                        setSelectedDate(e.target.value);
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main className="flex-1 p-6 mx-auto w-full max-w-[1600px] space-y-8">
+                {error && (
+                    <div className="rounded-3xl border border-rose-200 bg-rose-50 px-6 py-4 text-sm font-semibold text-rose-700">
+                        {error}
+                    </div>
+                )}
+
+                {/* Top Summary Cards with Hover */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-emerald-400">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Gross Revenue</span>
+                        <h2 className="text-3xl font-black text-emerald-600">{currencyFromPesos(grossRevenue)}</h2>
+                    </div>
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-blue-400">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Orders Processed</span>
+                        <h2 className="text-3xl font-black text-blue-600">{ordersProcessed}</h2>
+                    </div>
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-rose-400">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Refund & Cancellations</span>
+                        <h2 className="text-3xl font-black text-rose-600">{cancelledOrdersCount}</h2>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+                    {/* Hourly Sales Peak Card with Hover */}
+                    <div className="xl:col-span-3 bg-white p-8 rounded-[2.5rem] border-b-4 border-slate-200 shadow-xl min-h-[480px] flex flex-col transition-all duration-300 hover:shadow-2xl">
+                        <div className="flex items-center justify-between mb-10">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800">Hourly Sales Peak</h3>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">Sales by completed order hour</p>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 flex items-end justify-around gap-4 px-4 pb-6 border-b border-slate-100">
+                            {hourlySales.map((bar) => {
+                                const pct = grossRevenue ? Math.max(6, Math.round((bar.amount / grossRevenue) * 100)) : 6;
+                                return (
+                                    <div key={bar.time} className="flex-1 flex flex-col items-center group max-w-[80px]">
+                                        <span className="mb-2 text-[10px] font-black text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            {currencyFromPesos(bar.amount)}
+                                        </span>
+                                        <div className="w-full bg-emerald-500/10 rounded-t-2xl transition-all duration-500 shadow-inner relative overflow-hidden" style={{ height: `${pct}%` }}>
+                                            <div className="h-full bg-emerald-500 rounded-t-2xl group-hover:bg-emerald-400 transition-colors" />
+                                        </div>
+                                        <span className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-tighter">
+                                            {bar.time}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="space-y-8">
+                        {/* Favorites Card with Hover */}
+                        <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl transition-all duration-300 hover:shadow-2xl">
+                            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Top Favorites</h3>
+                            <div className="space-y-5">
+                                {topFavorites.length === 0 ? (
+                                    <p className="text-sm text-slate-500">No item sales to display yet.</p>
+                                ) : (
+                                    topFavorites.map((item) => (
+                                        <div key={item.id} className="flex items-center justify-between group cursor-default">
+                                            <span className="text-xs font-bold text-slate-600 truncate mr-2 group-hover:text-emerald-600 transition-colors">{item.name}</span>
+                                            <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded-lg text-slate-500 group-hover:bg-emerald-50 group-hover:text-emerald-600 transition-colors">
+                                                {item.qty} Sold
+                                            </span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Payment Breakdown Card - Updated Hover Logic */}
+                        <button
+                            type="button"
+                            onClick={() => setShowPaymentModal(true)}
+                            className="w-full text-left bg-slate-900 p-6 rounded-[2rem] border-b-4 border-slate-700 shadow-xl text-white hover:shadow-2xl hover:translate-y-[-4px] transition-all active:scale-[0.98] group"
+                        >
+                            <h3 className="text-sm font-black uppercase tracking-widest mb-6 text-emerald-400">Payment Breakdown</h3>
+                            <div className="space-y-4">
+                                {paymentBreakdown.map((payment) => (
+                                    <div
+                                        key={payment.method}
+                                        className="w-full rounded-[1.75rem] border border-slate-800 bg-slate-900/80 px-4 py-4 transition-all hover:border-emerald-400 hover:bg-emerald-500/5 group/item"
+                                    >
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <p className="text-xs font-black uppercase tracking-tighter text-slate-300 group-hover/item:text-emerald-400 transition-colors">{payment.method}</p>
+                                                <p className="text-[9px] font-bold text-slate-500 uppercase">{payment.count} txns</p>
+                                            </div>
+                                            <p className="text-sm font-black text-white">{currencyFromPesos(payment.total)}</p>
+                                        </div>
+                                        <div className="mt-3 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                                            <div 
+                                                className="h-full bg-emerald-500 transition-all duration-500" 
+                                                style={{ width: payment.method === 'cash' ? '70%' : '30%' }} 
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Table with Integrated Sorting Header */}
+<div className="bg-white rounded-[2.5rem] border-b-4 border-slate-200 shadow-xl overflow-hidden transition-all duration-300 hover:shadow-2xl">
+    <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-white">
+        <h3 className="text-lg font-black text-slate-800">Inventory & Profit Breakdown</h3>
+        <button
+            type="button"
+            onClick={exportToCSV}
+            className="px-6 py-2.5 bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
+        >
+            Export CSV Report
+        </button>
+    </div>
+    
+    <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+            <thead>
+                <tr className="bg-slate-50/80">
+                    <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        Item Details
+                    </th>
+                    
+                    {/* Sortable Header: Category */}
+                    <th 
+                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors"
+                        onClick={() => {
+                            const nextDirection = categorySortDirection === 'asc' ? 'desc' : 'asc';
+                            setCategorySortDirection(nextDirection);
+                            setInventorySort({ field: 'category', direction: nextDirection });
+                        }}
+                    >
+                        <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'category' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                                Category
+                            </span>
+                            {inventorySort.field === 'category' && (
+                                categorySortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
+                            )}
+                        </div>
+                    </th>
+
+                    {/* Sortable Header: Qty Sold */}
+                    <th 
+                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors"
+                        onClick={() => setInventorySort((prev) => ({
+                            field: 'qtySold',
+                            direction: prev.field === 'qtySold' && prev.direction === 'desc' ? 'asc' : 'desc',
+                        }))}
+                    >
+                        <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'qtySold' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                                Qty Sold
+                            </span>
+                            {inventorySort.field === 'qtySold' && (
+                                inventorySort.direction === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
+                            )}
+                        </div>
+                    </th>
+
+                    {/* Sortable Header: Net Sales */}
+                    <th 
+                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors"
+                        onClick={() => setInventorySort((prev) => ({
+                            field: 'netSales',
+                            direction: prev.field === 'netSales' && prev.direction === 'desc' ? 'asc' : 'desc',
+                        }))}
+                    >
+                        <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'netSales' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                                Net Sales
+                            </span>
+                            {inventorySort.field === 'netSales' && (
+                                inventorySort.direction === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
+                            )}
+                        </div>
+                    </th>
+
+                    {/* Sortable Header: Net Profit (Right Aligned) */}
+                    <th 
+                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors text-right"
+                        onClick={() => setInventorySort((prev) => ({
+                            field: 'netProfit',
+                            direction: prev.field === 'netProfit' && prev.direction === 'desc' ? 'asc' : 'desc',
+                        }))}
+                    >
+                        <div className="flex items-center justify-end gap-2">
+                            <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'netProfit' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                                Net Profit
+                            </span>
+                            {inventorySort.field === 'netProfit' && (
+                                inventorySort.direction === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
+                            )}
+                        </div>
+                    </th>
+                </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+                {sortedInventoryRows.length === 0 ? (
+                    <tr>
+                        <td colSpan={5} className="px-8 py-12 text-sm text-slate-500 text-center italic">
+                            No sales data available for this period.
+                        </td>
+                    </tr>
+                ) : (
+                    sortedInventoryRows.map((item) => (
+                        <tr key={item.id} className="group hover:bg-emerald-50/40 transition-colors">
+                            <td className="px-8 py-5">
+                                <p className="text-sm font-bold text-slate-800 leading-tight group-hover:text-emerald-700 transition-colors">
+                                    {item.name}
+                                </p>
+                            </td>
+                            <td className="px-8 py-5">
+                                <span className="text-[10px] font-black uppercase px-2 py-1 bg-slate-100 text-slate-500 rounded-lg group-hover:bg-white transition-colors">
+                                    {item.category ?? '—'}
+                                </span>
+                            </td>
+                            <td className="px-8 py-5 text-sm font-black text-slate-500">
+                                {item.qtySold}
+                            </td>
+                            <td className="px-8 py-5 text-sm font-black text-slate-900">
+                                {currencyFromPesos(item.netSales)}
+                            </td>
+                            <td className="px-8 py-5 text-sm font-black text-emerald-600 text-right">
+                                {currencyFromPesos(item.netProfit)}
+                            </td>
+                        </tr>
+                    ))
+                )}
+            </tbody>
+        </table>
+    </div>
+</div>
+            </main>
+
+            {showPaymentModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setShowPaymentModal(false)} />
+                    <div className="relative w-full max-w-4xl max-h-[90vh] rounded-[2rem] bg-white border border-slate-200 shadow-2xl overflow-hidden flex flex-col">
+                        <div className="flex-none p-8 border-b border-slate-100 flex items-center justify-between bg-white">
+                            <div>
+                                <h3 className="text-lg font-black text-slate-800 uppercase">Payment Breakdown Details</h3>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowPaymentModal(false)}
+                                className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="sticky top-0 bg-slate-50/50">
+                                        <tr>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Type</th>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Payment Transactions</th>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Payment Amount</th>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Cancelled Transactions</th>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Refund Amount</th>
+                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Net Amount</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {paymentBreakdown.map((payment) => (
+                                            <tr key={payment.method} className="group hover:bg-slate-50/50 transition-colors">
+                                                <td className="px-8 py-5">
+                                                    <p className="text-sm font-black text-slate-800 uppercase">{payment.method}</p>
+                                                </td>
+                                                <td className="px-8 py-5 text-sm font-black text-slate-600 text-right">{payment.count}</td>
+                                                <td className="px-8 py-5 text-sm font-black text-slate-900 text-right">{currencyFromPesos(payment.total)}</td>
+                                                <td className="px-8 py-5 text-sm font-black text-rose-600 text-right">{payment.cancelledCount}</td>
+                                                <td className="px-8 py-5 text-sm font-black text-rose-600 text-right">{currencyFromPesos(payment.refundAmount)}</td>
+                                                <td className="px-8 py-5 text-sm font-black text-emerald-600 text-right">{currencyFromPesos(payment.netAmount)}</td>
+                                            </tr>
+                                        ))}
+                                        <tr className="bg-slate-100/50 font-black border-t-2 border-slate-300">
+                                            <td className="px-8 py-5 text-sm text-slate-800">TOTAL</td>
+                                            <td className="px-8 py-5 text-sm text-slate-800 text-right">
+                                                {paymentBreakdown.reduce((sum, p) => sum + p.count, 0)}
+                                            </td>
+                                            <td className="px-8 py-5 text-sm text-slate-900 text-right">
+                                                {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.total, 0))}
+                                            </td>
+                                            <td className="px-8 py-5 text-sm text-rose-600 text-right">
+                                                {paymentBreakdown.reduce((sum, p) => sum + p.cancelledCount, 0)}
+                                            </td>
+                                            <td className="px-8 py-5 text-sm text-rose-600 text-right">
+                                                {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.refundAmount, 0))}
+                                            </td>
+                                            <td className="px-8 py-5 text-sm text-emerald-600 text-right">
+                                                {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.netAmount, 0))}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div className="flex-none p-3 bg-slate-50 border-t border-slate-100 flex justify-end"></div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 function EditItems() {
     const [products, setProducts] = React.useState([]);
     const [error, setError] = React.useState(null);
@@ -1758,6 +2398,7 @@ function Kitchen() {
                             </div>
                             <ButtonLink to="/items" className="bg-white border shadow-sm">Items</ButtonLink>
                             <ButtonLink to="/kitchen/history" className="bg-white border shadow-sm">History</ButtonLink>
+                            <ButtonLink to="/kitchen/analytics" className="bg-white border shadow-sm">Analytics</ButtonLink>
                         </div>
                     </div>
                 </header>
@@ -2484,6 +3125,10 @@ function App() {
                 <Route
                     path="/kitchen/history"
                     element={<OrderHistory mode="kitchen" />}
+                />
+                <Route
+                    path="/kitchen/analytics"
+                    element={<KitchenAnalytics />}
                 />
             </Routes>
         </BrowserRouter>
