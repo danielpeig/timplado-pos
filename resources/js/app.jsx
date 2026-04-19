@@ -23,6 +23,22 @@ function getOrderLabel(order) {
     return order.preorder_number ? `Pre-Order #${order.preorder_number}` : `#${order.id ?? '—'}`;
 }
 
+function formatOrderDateTime(createdAtDate) {
+    if (!createdAtDate) return '';
+    const date = new Date(createdAtDate);
+    if (isNaN(date.getTime())) return '';
+    
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const day = date.getDate();
+    const hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    const displayHours = hours % 12 || 12;
+    
+    return `${month} ${day} | ${displayHours}:${minutes} ${ampm}`;
+}
+
 function buildOrderSlipHtml(order) {
     const itemsRows = (order.items ?? [])
         .map((it) => {
@@ -69,6 +85,8 @@ function buildOrderSlipHtml(order) {
   <h1>Order Slip</h1>
   <div class="meta">
     <div><strong>Order: </strong> ${getOrderLabel(order)}</div>
+    <div><strong>Order Date: </strong> ${formatOrderDateTime(order.created_at)}</div>
+    <div><strong>Completed Date: </strong> ${formatOrderDateTime(order.completed_at)}</div>
     <div><strong>Type: </strong> ${order.order_type === 'dine_in' ? 'Dine In' : 'Takeout'}</div>
     <div><strong>${order.order_type === 'dine_in' ? 'Table' : 'Customer'}: </strong> ${order.order_type === 'dine_in' ? order.table_number ?? '—' : order.customer_name ?? '—'}</div>
     <div><strong>Payment:  </strong> ${order.payment_mode === 'gcash' ? 'Gcash' : order.payment_mode === 'cash' ? 'Cash' : '—'}</div>
@@ -950,7 +968,7 @@ function FrontStatus() {
                                 className="flex flex-col bg-white rounded-[2rem] border-b-4 border-slate-200 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-300"
                             >
                                 {/* Header */}
-                                <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-white">
+                                <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-white">
                                     <div className="flex flex-col">
                                         <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Order</span>
                                         <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
@@ -1280,6 +1298,7 @@ function OrderHistory({ mode }) {
                                     <div className="flex flex-col">
                                         <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Order</span>
                                         <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
+                                        <span className="text-[11px] text-slate-600 mt-1">{formatOrderDateTime(o.completed_at ?? o.created_at)}</span>
                                     </div>
                                     {orderStatusBadge(o.status, index)}
                                 </div>
@@ -1357,11 +1376,20 @@ function OrderHistory({ mode }) {
                                 )}
                                 
                                 {/* Summary Footer with Grand Total */}
-                                <div className="mt-auto p-5 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                                    <span className="text-lg font-black text-slate-900">
-                                        {currencyFromPesos((o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}
-                                    </span>
+                                <div className="mt-auto p-5 bg-slate-50 border-t border-slate-100 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
+                                        <span className="text-lg font-black text-slate-900">
+                                            {currencyFromPesos((o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}
+                                        </span>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => printOrderSlip(o)}
+                                        className="w-full rounded-2xl bg-slate-900 py-3 text-[11px] font-black text-white shadow-sm transition-all active:scale-95 hover:bg-slate-800"
+                                    >
+                                        Print Order Slip
+                                    </button>
                                 </div>
                             </div>
                         ))}
@@ -1801,12 +1829,7 @@ function Kitchen() {
 
                                     {/* 3. Scrollable Items Area */}
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                                        {o.note && (
-                                            <div className="mb-4 rounded-2xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900 italic shadow-sm">
-                                                <span className="font-black uppercase text-[9px] text-amber-600 block mb-1">Kitchen Note:</span>
-                                                "{o.note}"
-                                            </div>
-                                        )}
+                                        
 
                                         <div className="space-y-1">
                                             {o.items?.map((it) => (
@@ -1835,6 +1858,14 @@ function Kitchen() {
                                                 </label>
                                             ))}
                                         </div>
+
+                                        {o.note && (
+                                            <div className="mb-4 rounded-2xl bg-amber-50 border border-amber-100 p-3 text-sm text-amber-900 italic shadow-sm">
+                                                <span className="font-black uppercase text-[9px] text-amber-600 block mb-1">Note:</span>
+                                                "{o.note}"
+                                            </div>
+                                        )}
+
                                     </div>
 
                                     {/* 4. Action Footer */}
@@ -1859,7 +1890,7 @@ function Kitchen() {
                                             onClick={() => setCancelingOrderId(o.id)}
                                             className="w-full py-1 text-[10px] font-bold text-rose-400 uppercase tracking-widest hover:text-rose-600 transition"
                                         >
-                                            Cancel Request
+                                            CANCEL ORDER
                                         </button>
                                     </div>
                                 </div>
@@ -1998,6 +2029,11 @@ function Kitchen() {
         const [toastMessage, setToastMessage] = React.useState(null);
         const [isLeaving, setIsLeaving] = React.useState(false);
         const [error, setError] = React.useState(null);
+        const [showNoteModal, setShowNoteModal] = React.useState(false);
+        const [activePreOrder, setActivePreOrder] = React.useState(null);
+        const [noteDraft, setNoteDraft] = React.useState('');
+        const [modalAction, setModalAction] = React.useState('send');
+        const [cancelingPreOrderId, setCancelingPreOrderId] = React.useState(null);
 
         React.useEffect(() => {
             fetchPreOrders();
@@ -2034,22 +2070,104 @@ function Kitchen() {
             }
         }
 
-        async function sendToKitchen(preOrder) {
+        function openNoteModal(preOrder, action = 'send') {
+            setActivePreOrder(preOrder);
+            setModalAction(action);
+            setNoteDraft(preOrder.note ?? '');
+            setShowNoteModal(true);
+        }
+
+        function closeNoteModal() {
+            setShowNoteModal(false);
+            setActivePreOrder(null);
+            setNoteDraft('');
+            setModalAction('send');
+        }
+
+        async function patchPreOrder(preOrderId, payload) {
+            const r = await window.axios.patch(`/api/orders/${preOrderId}/status`, payload);
+            return r.data;
+        }
+
+        async function sendToKitchen(preOrder, note = null) {
             setError(null);
             setIsSending(true);
             setSendingId(preOrder.id);
 
             try {
-                const r = await window.axios.patch(`/api/orders/${preOrder.id}/status`, {
+                const r = await patchPreOrder(preOrder.id, {
                     status: 'new',
+                    note: note?.trim() ? note.trim() : null,
                 });
-                window.localStorage.setItem('lastOrderSlip', JSON.stringify(r.data));
+                window.localStorage.setItem('lastOrderSlip', JSON.stringify(r));
 
                 const next = preOrders.filter((o) => o.id !== preOrder.id);
                 setPreOrdersState(next);
-                setToastMessage(`${getOrderLabel(r.data)} sent to kitchen`);
+                setToastMessage(`${getOrderLabel(r)} sent to kitchen`);
+                closeNoteModal();
             } catch (e) {
                 setError(e?.response?.data?.message ?? e?.message ?? 'Failed to send pre-order');
+            } finally {
+                setIsSending(false);
+                setSendingId(null);
+            }
+        }
+
+        async function savePreOrderNote(preOrder, note = null) {
+            setError(null);
+            setIsSending(true);
+            setSendingId(preOrder.id);
+
+            try {
+                const r = await patchPreOrder(preOrder.id, {
+                    note: note?.trim() ? note.trim() : null,
+                });
+
+                const next = preOrders.map((o) => (o.id === preOrder.id ? r : o));
+                setPreOrdersState(next);
+                setToastMessage(`Note updated for ${getOrderLabel(r)}`);
+                closeNoteModal();
+            } catch (e) {
+                setError(e?.response?.data?.message ?? e?.message ?? 'Failed to save note');
+            } finally {
+                setIsSending(false);
+                setSendingId(null);
+            }
+        }
+
+        async function handleNoteModalSubmit() {
+            if (!activePreOrder) return;
+
+            if (modalAction === 'send') {
+                await sendToKitchen(activePreOrder, noteDraft);
+            } else {
+                await savePreOrderNote(activePreOrder, noteDraft);
+            }
+        }
+
+        function openCancelModal(preOrder) {
+            setCancelingPreOrderId(preOrder.id);
+        }
+
+        function closeCancelModal() {
+            setCancelingPreOrderId(null);
+        }
+
+        async function cancelPreOrder(preOrderId) {
+            setError(null);
+            setIsSending(true);
+            setSendingId(preOrderId);
+
+            try {
+                const r = await patchPreOrder(preOrderId, {
+                    status: 'cancelled',
+                });
+
+                setPreOrdersState((prev) => prev.filter((o) => o.id !== preOrderId));
+                setToastMessage(`${getOrderLabel(r)} cancelled successfully`);
+                closeCancelModal();
+            } catch (e) {
+                setError(e?.response?.data?.message ?? e?.message ?? 'Failed to cancel pre-order');
             } finally {
                 setIsSending(false);
                 setSendingId(null);
@@ -2179,10 +2297,27 @@ function Kitchen() {
                                             <button
                                                 type="button"
                                                 disabled={isSending && sendingId === o.id}
-                                                onClick={() => sendToKitchen(o)}
-                                                className="w-full rounded-2xl bg-slate-900 py-3 text-[11px] font-black text-white shadow-sm transition-all active:scale-95 hover:bg-slate-800 disabled:opacity-50"
+                                                onClick={() => openNoteModal(o, 'send')}
+                                                                                        className="w-full rounded-2xl bg-slate-900 py-3 text-[11px] font-black text-white shadow-sm transition-all active:scale-95 hover:bg-slate-800"
+
                                             >
-                                                {isSending && sendingId === o.id ? 'Sending…' : 'Send to Kitchen'}
+                                                {isSending && sendingId === o.id ? 'Sending…' : 'SEND TO KITCHEN'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={isSending && sendingId === o.id}
+                                                onClick={() => openNoteModal(o, 'edit')}
+                                                className="w-full rounded-2xl border border-slate-200 bg-white py-3 text-[11px] font-black text-slate-900 shadow-sm transition-all hover:bg-slate-50 disabled:opacity-50"
+                                            >
+                                                {o.note ? 'Edit Note' : 'Add Note'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                disabled={isSending && sendingId === o.id}
+                                                onClick={() => openCancelModal(o)}
+                                                className="w-full rounded-2xl border border-rose-200 bg-white py-3 text-[11px] font-black text-rose-600 shadow-sm transition-all hover:bg-rose-50 disabled:opacity-50"
+                                            >
+                                                CANCEL PRE-ORDER
                                             </button>
                                         </div>
                                     </div>
@@ -2192,6 +2327,119 @@ function Kitchen() {
                     )}
                 </main>
 
+                {showNoteModal && activePreOrder && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/40" onClick={closeNoteModal} />
+                        <div className="relative w-full max-w-2xl rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <h2 className="text-2xl font-bold text-slate-900">
+                                        {modalAction === 'send' ? 'Send Pre-Order to Kitchen' : 'Edit Pre-Order Note'}
+                                    </h2>
+                                    <p className="mt-2 text-sm text-slate-500">
+                                        {modalAction === 'send'
+                                            ? 'You can add or update the note before sending this pre-order to the kitchen.'
+                                            : 'Edit the existing note for this pre-order.'}
+                                    </p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeNoteModal}
+                                    className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                                <div className="grid grid-cols-2 gap-4 text-sm text-slate-600">
+                                    <div>
+                                        <div className="font-semibold text-slate-900">Order</div>
+                                        <div>{getOrderLabel(activePreOrder)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="font-semibold text-slate-900">Placed</div>
+                                        <div>{formatOrderDateTime(activePreOrder.created_at)}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6">
+                                <label className="block text-sm font-semibold text-slate-900 mb-2">Kitchen note</label>
+                                <textarea
+                                    value={noteDraft}
+                                    onChange={(e) => setNoteDraft(e.target.value)}
+                                    rows={4}
+                                    className="w-full rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200"
+                                    placeholder="Add special instructions for the kitchen..."
+                                />
+                            </div>
+
+                            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={closeNoteModal}
+                                    className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleNoteModalSubmit}
+                                    disabled={isSending && sendingId === activePreOrder.id}
+                                    className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-200 disabled:opacity-50"
+                                >
+                                    {isSending && sendingId === activePreOrder.id
+                                        ? 'Saving…'
+                                        : modalAction === 'send'
+                                            ? 'Send to Kitchen'
+                                            : 'Save Note'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {cancelingPreOrderId && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <div className="absolute inset-0 bg-black/40" onClick={closeCancelModal} />
+                        <div className="relative w-full max-w-lg rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <div className="text-xl font-bold text-slate-900">Cancel Pre-Order</div>
+                                    <div className="text-sm text-slate-500 mt-1">
+                                        Are you sure you want to cancel {getOrderLabel(preOrders.find((o) => o.id === cancelingPreOrderId) ?? {})}?
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeCancelModal}
+                                    className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                >
+                                    <X className="h-5 w-5" />
+                                </button>
+                            </div>
+
+                            <div className="mt-5 flex gap-3">
+                                <button
+                                    type="button"
+                                    onClick={closeCancelModal}
+                                    className="flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                    Keep Pre-Order
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => cancelPreOrder(cancelingPreOrderId)}
+                                    disabled={isSending && sendingId === cancelingPreOrderId}
+                                    className="flex-1 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
+                                >
+                                    {isSending && sendingId === cancelingPreOrderId ? 'Cancelling…' : 'Cancel Pre-Order'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 {toastMessage && (
                     <div className={`fixed top-24 right-6 z-50 pointer-events-auto ${isLeaving ? 'animate-toast-slide-out' : 'animate-toast-slide-in'}`}>
                         <div className="relative overflow-hidden rounded-2xl border border-emerald-100 bg-white p-4 shadow-2xl shadow-emerald-200/50 min-w-[340px]">

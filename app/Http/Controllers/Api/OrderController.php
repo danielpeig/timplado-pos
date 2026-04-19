@@ -95,12 +95,33 @@ class OrderController extends Controller
     public function updateStatus(Request $request, Order $order)
     {
         $data = $request->validate([
-            'status' => ['required', 'string', 'in:new,in_progress,done,cancelled'],
+            'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled'],
+            'note' => ['sometimes', 'nullable', 'string', 'max:2000'],
         ]);
 
-        $order->update([
-            'status' => $data['status'],
-        ]);
+        if (empty($data)) {
+            return response()->json([
+                'message' => 'No changes provided.',
+            ], 422);
+        }
+
+        $update = [];
+
+        if (array_key_exists('status', $data)) {
+            $update['status'] = $data['status'];
+
+            if ($data['status'] === 'done') {
+                $update['completed_at'] = now();
+            } else {
+                $update['completed_at'] = null;
+            }
+        }
+
+        if (array_key_exists('note', $data)) {
+            $update['note'] = $data['note'];
+        }
+
+        $order->update($update);
 
         $order->load(['items.product']);
 

@@ -15,6 +15,11 @@ class Order extends Model
         'customer_name',
         'payment_mode',
         'preorder_number',
+        'completed_at',
+    ];
+
+    protected $casts = [
+        'completed_at' => 'datetime',
     ];
 
     public function items(): HasMany
