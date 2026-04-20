@@ -1902,16 +1902,16 @@ function KitchenAnalytics() {
                                         <div className="flex items-center justify-between gap-4">
                                             <div className="min-w-0">
                                                 <p className="text-xs font-black uppercase tracking-tighter text-slate-300 group-hover/item:text-emerald-400 transition-colors">{payment.method}</p>
-                                                <p className="text-[9px] font-bold text-slate-500 uppercase">{payment.count} txns</p>
+                                                <p className="text-[9px] font-bold text-slate-500 uppercase">{payment.count} transactions</p>
                                             </div>
                                             <p className="text-sm font-black text-white">{currencyFromPesos(payment.total)}</p>
                                         </div>
-                                        <div className="mt-3 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                                        {/* <div className="mt-3 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
                                             <div 
                                                 className="h-full bg-emerald-500 transition-all duration-500" 
                                                 style={{ width: payment.method === 'cash' ? '70%' : '30%' }} 
                                             />
-                                        </div>
+                                        </div> */}
                                     </div>
                                 ))}
                             </div>
