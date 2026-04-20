@@ -3,7 +3,7 @@ import { Printer, X, ArrowUp, ArrowDown } from 'lucide-react';
 
 import React, { useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 function currencyFromPesos(pricePesos) {
     if (pricePesos == null) return '';
@@ -179,11 +179,13 @@ function ModeSelect() {
     );
 }
 
-function ButtonLink({ to, children }) {
+function ButtonLink({ to, children, state, className, ...props }) {
     return (
         <Link
             to={to}
-            className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition"
+            state={state}
+            className={`inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-50 transition ${className ?? ''}`}
+            {...props}
         >
             {children}
         </Link>
@@ -539,7 +541,7 @@ function FrontDesk() {
                         </span>
                         <ButtonLink to="/front/status" className="bg-white border shadow-sm">Status</ButtonLink>
                         <ButtonLink to="/front/preorders" className="bg-white border shadow-sm">Pre-Orders</ButtonLink>
-                        <ButtonLink to="/front/history" className="bg-white border shadow-sm">History</ButtonLink>
+                        <ButtonLink to="/front/history" className="bg-white border shadow-sm">Order History</ButtonLink>
                     </div>
                 </div>
             </header>
@@ -1172,6 +1174,8 @@ function FrontStatus() {
 }
 
 function OrderHistory({ mode }) {
+    const navigate = useNavigate();
+    const location = useLocation();
     const [orders, setOrders] = React.useState([]);
     const [error, setError] = React.useState(null);
     const [statusFilter, setStatusFilter] = React.useState('completed');
@@ -1231,9 +1235,13 @@ function OrderHistory({ mode }) {
             <header className="flex-none sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur-md px-6 py-4">
                 <div className="max-w-[1600px] mx-auto flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <ButtonLink to={mode === 'kitchen' ? '/kitchen' : '/front'} className="text-slate-500">
+                        <button
+                            type="button"
+                            onClick={() => navigate(location.state?.from ?? (mode === 'kitchen' ? '/kitchen' : '/front'))}
+                            className="inline-flex items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-500 hover:bg-slate-50 transition"
+                        >
                             <span className="text-lg">←</span>
-                        </ButtonLink>
+                        </button>
                         {/* Logo and Text Group */}
                             <div className="flex items-center gap-4">
                                 <img 
@@ -1524,8 +1532,8 @@ function KitchenAnalytics() {
         fetchOrders();
     }, [activeFilter, selectedDate]);
 
-    const completedOrders = orders.filter((order) => order.status === 'done' || order.status === 'completed');
-    const cancelledOrders = orders.filter((order) => order.status === 'cancelled');
+    // Exclude archived orders from analytics
+    const completedOrders = orders.filter((order) => (order.status === 'done' || order.status === 'completed') && order.status !== 'archived');
     
     const orderItems = completedOrders.flatMap((order) =>
         (order.items ?? []).map((item) => ({
@@ -1541,9 +1549,8 @@ function KitchenAnalytics() {
     );
 
     const ordersProcessed = completedOrders.length;
-    const cancelledOrdersCount = cancelledOrders.length;
 
-    const hourlyLabels = [9, 10, 11, 12, 13];
+    const hourlyLabels = [8, 9, 10, 11, 12, 13, 14, 15];
     const hourlySales = hourlyLabels.map((hour) => {
         const total = completedOrders.reduce((sum, order) => {
             const completedAt = order.completed_at ? new Date(order.completed_at) : null;
@@ -1584,7 +1591,6 @@ function KitchenAnalytics() {
 
     const paymentBreakdown = ['cash', 'gcash'].map((method) => {
         const ordersByMethod = completedOrders.filter((order) => order.payment_mode === method);
-        const cancelledByMethod = cancelledOrders.filter((order) => order.payment_mode === method);
         
         const total = ordersByMethod.reduce(
             (sum, order) =>
@@ -1594,25 +1600,11 @@ function KitchenAnalytics() {
                 ),
             0,
         );
-        
-        const refundAmount = cancelledByMethod.reduce(
-            (sum, order) =>
-                sum + (order.items ?? []).reduce(
-                    (orderSum, item) => orderSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
-                    0,
-                ),
-            0,
-        );
-        
-        const netAmount = total - refundAmount;
 
         return {
             method,
             count: ordersByMethod.length,
             total,
-            cancelledCount: cancelledByMethod.length,
-            refundAmount,
-            netAmount,
         };
     });
 
@@ -1718,6 +1710,7 @@ function KitchenAnalytics() {
 
     return (
         <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col font-sans">
+            {/* 1. Simplified Header */}
             <header className="flex-none sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur-md px-6 py-4">
                 <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-8">
                     <div className="flex items-center gap-4">
@@ -1731,55 +1724,11 @@ function KitchenAnalytics() {
                                 <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Financial Sales Tracking</p>
                             </div>
                         </div>
+                        
                     </div>
-
-                    <div className="flex items-center gap-2 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/50">
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setActiveFilter('Overall');
-                                setSelectedDate('');
-                            }}
-                            className={`px-6 py-2 text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all duration-300 border ${
-                                activeFilter === 'Overall'
-                                    ? 'bg-white shadow-md text-slate-900 border-slate-100'
-                                    : 'border-transparent text-slate-400 hover:text-slate-600'
-                            }`}
-                        >
-                            Overall
-                        </button>
-
-                        <div className="h-6 w-[1px] bg-slate-300/40 mx-1" />
-
-                        <div
-                            onClick={openDatePicker}
-                            className={`flex items-center gap-4 px-4 py-2 rounded-xl transition-all duration-300 cursor-pointer group border ${
-                                activeFilter === 'Custom'
-                                    ? 'bg-white shadow-sm border-emerald-100 ring-1 ring-emerald-500/10'
-                                    : 'border-transparent hover:bg-slate-200/50'
-                            }`}
-                        >
-                            <div className="flex flex-col items-end">
-                                <span className={`text-[8px] font-black uppercase tracking-tighter leading-none mb-1 transition-colors ${
-                                    activeFilter === 'Custom' ? 'text-emerald-600' : 'text-slate-400'
-                                }`}>
-                                    {activeFilter === 'Custom' ? 'Selected Date' : 'Pick Date'}
-                                </span>
-                                <input
-                                    ref={dateInputRef}
-                                    type="date"
-                                    value={selectedDate}
-                                    className={`bg-transparent text-sm font-black outline-none cursor-pointer transition-colors uppercase ${
-                                        activeFilter === 'Custom' ? 'text-slate-900' : 'text-slate-400 group-hover:text-slate-600'
-                                    }`}
-                                    onChange={(e) => {
-                                        setActiveFilter('Custom');
-                                        setSelectedDate(e.target.value);
-                                    }}
-                                />
-                            </div>
+                    <div className="flex items-center gap-3">
+                            <ButtonLink to="/kitchen/history" state={{ from: '/kitchen/analytics' }} className="bg-white border shadow-sm">Order History</ButtonLink>
                         </div>
-                    </div>
                 </div>
             </header>
 
@@ -1790,22 +1739,90 @@ function KitchenAnalytics() {
                     </div>
                 )}
 
-                {/* Top Summary Cards with Hover */}
+                {/* 2. Top Summary Grid: Now includes the Filter Card */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-emerald-400">
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Gross Revenue</span>
-                        <h2 className="text-3xl font-black text-emerald-600">{currencyFromPesos(grossRevenue)}</h2>
+                    {/* Master Filter Card */}
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-emerald-400 flex flex-col justify-between min-h-[140px]">
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Master Data Filter</span>
+                            {activeFilter === 'Custom' && (
+                                <span className="text-[8px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-widest animate-pulse">
+                                    Live: {selectedDate}
+                                </span>
+                            )}
+                        </div>
+                        
+                        <div className="flex items-stretch gap-2 bg-slate-100 p-1.5 rounded-[1.25rem] border border-slate-200/50">
+                            {/* Overall Button */}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setActiveFilter('Overall');
+                                    setSelectedDate('');
+                                }}
+                                className={`flex-1 px-4 py-2 text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all duration-300 ${
+                                    activeFilter === 'Overall'
+                                        ? 'bg-white shadow-md text-slate-900'
+                                        : 'text-slate-400 hover:text-slate-600'
+                                }`}
+                            >
+                                Overall
+                            </button>
+
+                            <div className="w-[1px] bg-slate-300/50 my-1" />
+
+                            {/* Custom Date Action */}
+                            <div 
+                                onClick={openDatePicker}
+                                className={`flex-[2] flex items-center justify-between px-4 py-2 rounded-xl transition-all duration-300 cursor-pointer group ${
+                                    activeFilter === 'Custom'
+                                        ? 'bg-white shadow-md border border-emerald-100'
+                                        : 'text-slate-400 hover:bg-slate-200/50 hover:text-slate-600'
+                                }`}
+                            >
+                                <div className="flex flex-col items-start overflow-hidden">
+                                    <span className={`text-[7px] font-black uppercase tracking-tighter leading-none mb-1 ${activeFilter === 'Custom' ? 'text-emerald-500' : 'text-slate-400'}`}>
+                                        {activeFilter === 'Custom' ? 'Selected' : 'Custom'}
+                                    </span>
+                                    <div className="relative">
+                                        {/* Hidden Input but functional */}
+                                        <input
+                                            ref={dateInputRef}
+                                            type="date"
+                                            value={selectedDate}
+                                            className="absolute inset-0 opacity-0 cursor-pointer"
+                                            onChange={(e) => {
+                                                setActiveFilter('Custom');
+                                                setSelectedDate(e.target.value);
+                                            }}
+                                        />
+                                        <span className={`text-[11px] font-black uppercase truncate block ${activeFilter === 'Custom' ? 'text-slate-900' : 'text-slate-400'}`}>
+                                            {selectedDate || 'Pick Date'}
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                {/* Fixed Single Calendar Icon */}
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" 
+                                    className={`w-4 h-4 transition-transform group-hover:scale-110 ${activeFilter === 'Custom' ? 'text-emerald-500' : 'text-slate-300'}`}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+                                </svg>
+                            </div>
+                        </div>
                     </div>
-                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-blue-400">
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Orders Processed</span>
-                        <h2 className="text-3xl font-black text-blue-600">{ordersProcessed}</h2>
+
+                    {/* Revenue Card */}
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-emerald-400 min-h-[140px] flex flex-col justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block">Gross Revenue</span>
+                        <h2 className="text-4xl font-black text-emerald-600 tracking-tight mb-3">{currencyFromPesos(grossRevenue)}</h2>
                     </div>
-                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-rose-400">
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Refund & Cancellations</span>
-                        <h2 className="text-3xl font-black text-rose-600">{cancelledOrdersCount}</h2>
+
+                    {/* Orders Card */}
+                    <div className="bg-white p-6 rounded-[2rem] border-b-4 border-slate-200 shadow-xl shadow-slate-200/50 transition-all duration-300 hover:translate-y-[-4px] hover:border-blue-400 min-h-[140px] flex flex-col justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 block">Orders Processed</span>
+                        <h2 className="text-4xl font-black text-blue-600 tracking-tight mb-3">{ordersProcessed}</h2>
                     </div>
                 </div>
-
                 <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
                     {/* Hourly Sales Peak Card with Hover */}
                     <div className="xl:col-span-3 bg-white p-8 rounded-[2.5rem] border-b-4 border-slate-200 shadow-xl min-h-[480px] flex flex-col transition-all duration-300 hover:shadow-2xl">
@@ -1816,23 +1833,36 @@ function KitchenAnalytics() {
                             </div>
                         </div>
 
-                        <div className="flex-1 flex items-end justify-around gap-4 px-4 pb-6 border-b border-slate-100">
-                            {hourlySales.map((bar) => {
-                                const pct = grossRevenue ? Math.max(6, Math.round((bar.amount / grossRevenue) * 100)) : 6;
-                                return (
-                                    <div key={bar.time} className="flex-1 flex flex-col items-center group max-w-[80px]">
-                                        <span className="mb-2 text-[10px] font-black text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {currencyFromPesos(bar.amount)}
-                                        </span>
-                                        <div className="w-full bg-emerald-500/10 rounded-t-2xl transition-all duration-500 shadow-inner relative overflow-hidden" style={{ height: `${pct}%` }}>
-                                            <div className="h-full bg-emerald-500 rounded-t-2xl group-hover:bg-emerald-400 transition-colors" />
+                        <div className="flex-1 flex items-end justify-around gap-4 px-4 pb-6 border-b border-slate-100 h-full">
+                            {hourlySales.some((bar) => bar.amount > 0) ? (
+                                hourlySales.map((bar) => {
+                                    {/* FIXED: Find the max amount among bars to scale correctly relative to each other */}
+                                    const maxVal = Math.max(...hourlySales.map(h => h.amount));
+                                    const pct = maxVal > 0 ? Math.max(6, Math.round((bar.amount / maxVal) * 100)) : 6;
+                                    
+                                    return (
+                                        <div key={bar.time} className="flex-1 flex flex-col items-center group max-w-[80px] h-full justify-end">
+                                            <span className="mb-2 text-[10px] font-black text-emerald-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                {currencyFromPesos(bar.amount)}
+                                            </span>
+                                            {/* FIXED: Using style attribute for height instead of dynamic Tailwind classes */}
+                                            <div 
+                                                className="w-full bg-emerald-500/10 rounded-t-2xl transition-all duration-500 shadow-inner relative overflow-hidden group-hover:bg-emerald-500/20" 
+                                                style={{ height: `${pct}%` }}
+                                            >
+                                                <div className="h-full bg-emerald-500 rounded-t-2xl group-hover:bg-emerald-400 transition-colors" />
+                                            </div>
+                                            <span className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-tighter shrink-0">
+                                                {bar.time}
+                                            </span>
                                         </div>
-                                        <span className="mt-4 text-[11px] font-black text-slate-400 uppercase tracking-tighter">
-                                            {bar.time}
-                                        </span>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })
+                            ) : (
+                                <div className="flex items-center justify-center w-full h-full italic text-slate-300 uppercase tracking-widest text-xs font-black">
+                                    No data to visualize
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -1890,44 +1920,44 @@ function KitchenAnalytics() {
                 </div>
 
                 {/* Table with Integrated Sorting Header */}
-<div className="bg-white rounded-[2.5rem] border-b-4 border-slate-200 shadow-xl overflow-hidden transition-all duration-300 hover:shadow-2xl">
-    <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-white">
-        <h3 className="text-lg font-black text-slate-800">Inventory & Profit Breakdown</h3>
-        <button
-            type="button"
-            onClick={exportToCSV}
-            className="px-6 py-2.5 bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
-        >
-            Export CSV Report
-        </button>
-    </div>
-    
-    <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-            <thead>
-                <tr className="bg-slate-50/80">
-                    <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Item Details
-                    </th>
+                <div className="bg-white rounded-[2.5rem] border-b-4 border-slate-200 shadow-xl overflow-hidden transition-all duration-300 hover:shadow-2xl">
+                    <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-white">
+                        <h3 className="text-lg font-black text-slate-800">Inventory & Profit Breakdown</h3>
+                        <button
+                            type="button"
+                            onClick={exportToCSV}
+                            className="px-6 py-2.5 bg-slate-900 text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-200"
+                        >
+                            Export CSV Report
+                        </button>
+                    </div>
                     
-                    {/* Sortable Header: Category */}
-                    <th 
-                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors"
-                        onClick={() => {
-                            const nextDirection = categorySortDirection === 'asc' ? 'desc' : 'asc';
-                            setCategorySortDirection(nextDirection);
-                            setInventorySort({ field: 'category', direction: nextDirection });
-                        }}
-                    >
-                        <div className="flex items-center gap-2">
-                            <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'category' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
-                                Category
-                            </span>
-                            {inventorySort.field === 'category' && (
-                                categorySortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
-                            )}
-                        </div>
-                    </th>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50/80">
+                                    <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                        Item Details
+                                    </th>
+                                    
+                                    {/* Sortable Header: Category */}
+                                    <th 
+                                        className="px-8 py-4 cursor-pointer group hover:bg-slate-100 transition-colors"
+                                        onClick={() => {
+                                            const nextDirection = categorySortDirection === 'asc' ? 'desc' : 'asc';
+                                            setCategorySortDirection(nextDirection);
+                                            setInventorySort({ field: 'category', direction: nextDirection });
+                                        }}
+                                    >
+                                    <div className="flex items-center gap-2">
+                                        <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${inventorySort.field === 'category' ? 'text-emerald-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                                            Category
+                                        </span>
+                                        {inventorySort.field === 'category' && (
+                                            categorySortDirection === 'asc' ? <ArrowUp className="h-3 w-3 text-emerald-500" /> : <ArrowDown className="h-3 w-3 text-emerald-500" />
+                                        )}
+                                    </div>
+                                </th>
 
                     {/* Sortable Header: Qty Sold */}
                     <th 
@@ -2046,9 +2076,6 @@ function KitchenAnalytics() {
                                             <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Payment Type</th>
                                             <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Payment Transactions</th>
                                             <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Payment Amount</th>
-                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Cancelled Transactions</th>
-                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Refund Amount</th>
-                                            <th className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 text-right">Net Amount</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-50">
@@ -2059,9 +2086,6 @@ function KitchenAnalytics() {
                                                 </td>
                                                 <td className="px-8 py-5 text-sm font-black text-slate-600 text-right">{payment.count}</td>
                                                 <td className="px-8 py-5 text-sm font-black text-slate-900 text-right">{currencyFromPesos(payment.total)}</td>
-                                                <td className="px-8 py-5 text-sm font-black text-rose-600 text-right">{payment.cancelledCount}</td>
-                                                <td className="px-8 py-5 text-sm font-black text-rose-600 text-right">{currencyFromPesos(payment.refundAmount)}</td>
-                                                <td className="px-8 py-5 text-sm font-black text-emerald-600 text-right">{currencyFromPesos(payment.netAmount)}</td>
                                             </tr>
                                         ))}
                                         <tr className="bg-slate-100/50 font-black border-t-2 border-slate-300">
@@ -2071,15 +2095,6 @@ function KitchenAnalytics() {
                                             </td>
                                             <td className="px-8 py-5 text-sm text-slate-900 text-right">
                                                 {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.total, 0))}
-                                            </td>
-                                            <td className="px-8 py-5 text-sm text-rose-600 text-right">
-                                                {paymentBreakdown.reduce((sum, p) => sum + p.cancelledCount, 0)}
-                                            </td>
-                                            <td className="px-8 py-5 text-sm text-rose-600 text-right">
-                                                {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.refundAmount, 0))}
-                                            </td>
-                                            <td className="px-8 py-5 text-sm text-emerald-600 text-right">
-                                                {currencyFromPesos(paymentBreakdown.reduce((sum, p) => sum + p.netAmount, 0))}
                                             </td>
                                         </tr>
                                     </tbody>
@@ -2426,7 +2441,7 @@ function Kitchen() {
                                 <div className="text-[10px] text-emerald-600 font-bold">Refreshing every 2s</div>
                             </div>
                             <ButtonLink to="/items" className="bg-white border shadow-sm">Items</ButtonLink>
-                            <ButtonLink to="/kitchen/history" className="bg-white border shadow-sm">History</ButtonLink>
+                            <ButtonLink to="/kitchen/history" state={{ from: '/kitchen' }} className="bg-white border shadow-sm">Order History</ButtonLink>
                             <ButtonLink to="/kitchen/analytics" className="bg-white border shadow-sm">Analytics</ButtonLink>
                         </div>
                     </div>
