@@ -106,6 +106,7 @@ class OrderController extends Controller
         $data = $request->validate([
             'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled,archived'],
             'note' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'payment_mode' => ['sometimes', 'string', 'in:cash,gcash'],
         ]);
 
         if (empty($data)) {
@@ -128,6 +129,10 @@ class OrderController extends Controller
 
         if (array_key_exists('note', $data)) {
             $update['note'] = $data['note'];
+        }
+
+        if (array_key_exists('payment_mode', $data)) {
+            $update['payment_mode'] = $data['payment_mode'];
         }
 
         $order->update($update);

@@ -64,19 +64,33 @@ function buildOrderSlipHtml(order) {
 <meta charset="utf-8" />
 <title>Order Slip ${getOrderLabel(order)}</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; color: #111; padding: 24px; }
+  @page {
+    size: 40mm auto;
+    margin: 0;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body { 
+    font-family: ui-sans-serif, system-ui, sans-serif; 
+    color: #111; 
+    padding: 2mm;
+    width: 36mm;
+    font-size: 10px;
+    line-height: 1.2;
+  }
   h1, h2, h3, p, div { margin: 0; }
-  h1 { font-size: 28px; margin-bottom: 12px; }
-  .meta { margin-bottom: 18px; }
-  .meta div { margin-bottom: 6px; font-size: 14px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-  th, td { padding: 10px 8px; border-bottom: 1px solid #ddd; }
+  h1 { font-size: 14px; margin-bottom: 4px; }
+  .meta { margin-bottom: 8px; }
+  .meta div { margin-bottom: 2px; font-size: 9px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { padding: 2px 0; border-bottom: 1px solid #ddd; font-size: 9px; }
   th { text-align: left; font-weight: 700; }
-  .total { margin-top: 16px; text-align: right; font-size: 16px; font-weight: 700; }
-  .note { margin-top: 16px; font-size: 14px; color: #444; }
-  .small { margin-top: 26px; font-size: 12px; color: #666; }
+  .total { margin-top: 6px; text-align: right; font-size: 11px; font-weight: 700; }
+  .note { margin-top: 6px; font-size: 9px; color: #444; }
+  .small { margin-top: 8px; font-size: 8px; color: #666; }
   @media print {
-    body { padding: 12mm; }
+    body { padding: 0; margin: 0; }
     .no-print { display: none !important; }
   }
 </style>
@@ -85,11 +99,10 @@ function buildOrderSlipHtml(order) {
   <h1>Order Slip</h1>
   <div class="meta">
     <div><strong>Order: </strong> ${getOrderLabel(order)}</div>
-    <div><strong>Order Date: </strong> ${formatOrderDateTime(order.created_at)}</div>
-    <div><strong>Completed Date: </strong> ${formatOrderDateTime(order.completed_at)}</div>
+    <div><strong>Date: </strong> ${formatOrderDateTime(order.created_at)}</div>
     <div><strong>Type: </strong> ${order.order_type === 'dine_in' ? 'Dine In' : 'Takeout'}</div>
     <div><strong>${order.order_type === 'dine_in' ? 'Table' : 'Customer'}: </strong> ${order.order_type === 'dine_in' ? order.table_number ?? '—' : order.customer_name ?? '—'}</div>
-    <div><strong>Payment:  </strong> ${order.payment_mode === 'gcash' ? 'Gcash' : order.payment_mode === 'cash' ? 'Cash' : '—'}</div>
+    <div><strong>Pay: </strong> ${order.payment_mode === 'gcash' ? 'Gcash' : order.payment_mode === 'cash' ? 'Cash' : '—'}</div>
   </div>
   <table>
     <thead>
@@ -103,7 +116,7 @@ function buildOrderSlipHtml(order) {
   </table>
   <div class="total">Total: ${currencyFromPesos(totalAmount)}</div>
   ${order.note ? `<div class="note"><strong>Note:</strong> ${order.note}</div>` : ''}
-  <div class="small">Printed from Timplado POS</div>
+  <div class="small">Timplado POS</div>
 </body>
 </html>`;
 }
@@ -253,18 +266,24 @@ function FrontDesk() {
 
     React.useEffect(() => {
         let isMounted = true;
-        window.axios
-            .get('/api/products')
-            .then((r) => {
+        
+        async function loadProducts() {
+            try {
+                const r = await window.axios.get('/api/products');
                 if (!isMounted) return;
                 setProducts(r.data);
-            })
-            .catch((e) => {
+            } catch (e) {
                 if (!isMounted) return;
                 setError(e?.message ?? 'Failed to load products');
-            });
+            }
+        }
+
+        loadProducts();
+        const interval = window.setInterval(loadProducts, 500);
+
         return () => {
             isMounted = false;
+            clearInterval(interval);
         };
     }, []);
 
@@ -387,7 +406,7 @@ function FrontDesk() {
         }
 
         refreshPendingOrders();
-        const interval = window.setInterval(refreshPendingOrders, 2000);
+        const interval = window.setInterval(refreshPendingOrders, 500);
 
         return () => {
             cancelled = true;
@@ -1180,6 +1199,26 @@ function OrderHistory({ mode }) {
     const [error, setError] = React.useState(null);
     const [statusFilter, setStatusFilter] = React.useState('completed');
     const [currentPage, setCurrentPage] = React.useState(1);
+    const [editingPaymentMode, setEditingPaymentMode] = React.useState(null);
+    const [tempPaymentMode, setTempPaymentMode] = React.useState('');
+    const [updatingPayment, setUpdatingPayment] = React.useState(null);
+
+    const handleUpdatePaymentMode = async (orderId) => {
+        if (!tempPaymentMode) return;
+        setUpdatingPayment(orderId);
+        try {
+            const r = await window.axios.patch(`/api/orders/${orderId}/status`, {
+                payment_mode: tempPaymentMode,
+            });
+            setOrders((prev) => prev.map((o) => (o.id === orderId ? r.data : o)));
+            setEditingPaymentMode(null);
+            setTempPaymentMode('');
+        } catch (e) {
+            setError('Failed to update payment mode.');
+        } finally {
+            setUpdatingPayment(null);
+        }
+    };
 
     React.useEffect(() => {
     const params = { history: true };
@@ -1342,17 +1381,53 @@ function OrderHistory({ mode }) {
                                             )}
                                         </div>
 
-                                        {/* Right Side: Payment Mode Magic */}
+                                        {/* Right Side: Payment Mode - Editable */}
                                         {o.payment_mode && (
                                             <div className="flex shrink-0 flex-col items-end">
                                                 <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] leading-none mb-1">Paid via</span>
-                                                <div className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border ${
-                                                    o.payment_mode === 'gcash' 
-                                                        ? 'text-blue-600 border-blue-100 bg-blue-50/50' 
-                                                        : 'text-slate-600 border-slate-200 bg-slate-100/50'
-                                                }`}>
-                                                    {o.payment_mode}
-                                                </div>
+                                                {editingPaymentMode === o.id ? (
+                                                    <div className="flex items-center gap-1">
+                                                        <select
+                                                            value={tempPaymentMode}
+                                                            onChange={(e) => setTempPaymentMode(e.target.value)}
+                                                            className="text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border border-blue-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                        >
+                                                            <option value="cash">Cash</option>
+                                                            <option value="gcash">Gcash</option>
+                                                        </select>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleUpdatePaymentMode(o.id)}
+                                                            disabled={updatingPayment === o.id}
+                                                            className="p-1 rounded bg-green-500 text-white hover:bg-green-600 disabled:opacity-50"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                            </svg>
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setEditingPaymentMode(null); setTempPaymentMode(''); }}
+                                                            className="p-1 rounded bg-slate-300 text-slate-600 hover:bg-slate-400"
+                                                        >
+                                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setEditingPaymentMode(o.id); setTempPaymentMode(o.payment_mode); }}
+                                                        className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md border cursor-pointer hover:opacity-70 transition ${
+                                                            o.payment_mode === 'gcash' 
+                                                                ? 'text-blue-600 border-blue-100 bg-blue-50/50' 
+                                                                : 'text-slate-600 border-slate-200 bg-slate-100/50'
+                                                        }`}>
+                                                        {o.payment_mode}
+                                                        <span className="ml-1 text-[8px]">✎</span>
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -2365,7 +2440,7 @@ function Kitchen() {
 
             const interval = setInterval(() => {
                 refresh().catch(() => {});
-            }, 2000);
+            }, 500);
 
             return () => {
                 cancelled = true;
@@ -2432,7 +2507,7 @@ function Kitchen() {
                         <div className="flex items-center gap-3">
                             <div className="hidden md:block text-right mr-4">
                                 <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">Live Sync</div>
-                                <div className="text-[10px] text-emerald-600 font-bold">Refreshing every 2s</div>
+                                <div className="text-[10px] text-emerald-600 font-bold">Refreshing every 0.5s</div>
                             </div>
                             <ButtonLink to="/items" className="bg-white border shadow-sm">Items</ButtonLink>
                             <ButtonLink to="/kitchen/history" state={{ from: '/kitchen' }} className="bg-white border shadow-sm">Order History</ButtonLink>
@@ -2442,7 +2517,7 @@ function Kitchen() {
                 </header>
 
                 {/* Horizontal Receipt Rail */}
-                <main className="flex-1 overflow-x-auto overflow-y-hidden p-6 mx-auto max-w-[1600px]">
+                <main className="flex-1 overflow-x-auto overflow-y-auto p-6 mx-auto max-w-[1600px]">
                 <div className="flex h-full gap-6 items-start">
                     {orders.length === 0 ? (
                         <div className="flex-1 flex flex-col items-center justify-center h-full text-slate-400 italic">
