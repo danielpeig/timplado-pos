@@ -16,10 +16,15 @@ class Order extends Model
         'payment_mode',
         'preorder_number',
         'completed_at',
+        'total',
+        'subtotal',
+        'discount_amount',
+        'discount_details',
     ];
 
     protected $casts = [
         'completed_at' => 'datetime',
+        'discount_details' => 'array',
     ];
 
     public function items(): HasMany

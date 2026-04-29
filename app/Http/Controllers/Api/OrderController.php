@@ -52,6 +52,10 @@ class OrderController extends Controller
             'items' => ['required', 'array', 'min:1'],
             'items.*.product_id' => ['required', 'integer', 'exists:products,id'],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:99'],
+            'total' => ['required', 'numeric'],
+            'subtotal' => ['nullable', 'numeric'],
+            'discount_amount' => ['nullable', 'numeric'],
+            'discount_details' => ['nullable', 'array'],
         ]);
 
         try {
@@ -69,6 +73,10 @@ class OrderController extends Controller
                     'customer_name' => $data['order_type'] === 'takeout' ? ($data['customer_name'] ?? null) : null,
                     'payment_mode' => $data['payment_mode'],
                     'preorder_number' => $preorderNumber,
+                    'total' => $data['total'],
+                    'subtotal' => $data['subtotal'] ?? $data['total'],
+                    'discount_amount' => $data['discount_amount'] ?? 0,
+                    'discount_details' => $data['discount_details'] ?? null,
                 ]);
 
                 foreach ($data['items'] as $item) {

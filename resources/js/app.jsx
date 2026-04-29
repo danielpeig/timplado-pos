@@ -53,10 +53,12 @@ function buildOrderSlipHtml(order) {
         })
         .join('');
 
-    const totalAmount = order.total ?? (order.items ?? []).reduce(
+    const subtotal = order.subtotal ?? (order.items ?? []).reduce(
         (sum, it) => sum + centsFromCartLine(it.product, it.quantity),
         0,
     );
+    const totalAmount = order.total ?? subtotal;
+    const discountAmount = order.discount_amount ?? 0;
 
     return `<!doctype html>
 <html>
@@ -86,6 +88,7 @@ function buildOrderSlipHtml(order) {
   table { width: 100%; border-collapse: collapse; margin-top: 4px; }
   th, td { padding: 2px 0; border-bottom: 1px solid #ddd; font-size: 9px; }
   th { text-align: left; font-weight: 700; }
+  .total-row { margin-top: 4px; display: flex; justify-content: space-between; font-size: 9px; }
   .total { margin-top: 6px; text-align: right; font-size: 11px; font-weight: 700; }
   .note { margin-top: 6px; font-size: 9px; color: #444; }
   .small { margin-top: 8px; font-size: 8px; color: #666; }
@@ -114,6 +117,16 @@ function buildOrderSlipHtml(order) {
     </thead>
     <tbody>${itemsRows}</tbody>
   </table>
+  ${discountAmount > 0 ? `
+  <div class="total-row" style="margin-top: 8px;">
+    <span>Subtotal:</span>
+    <span>${currencyFromPesos(subtotal)}</span>
+  </div>
+  <div class="total-row" style="color: #059669; font-weight: 700;">
+    <span>Discount:</span>
+    <span>-${currencyFromPesos(discountAmount)}</span>
+  </div>
+  ` : ''}
   <div class="total">Total: ${currencyFromPesos(totalAmount)}</div>
   ${order.note ? `<div class="note"><strong>Note:</strong> ${order.note}</div>` : ''}
   <div class="small">Timplado POS</div>
@@ -263,6 +276,52 @@ function FrontDesk() {
     const [toastMessage, setToastMessage] = React.useState(null);
     const [isLeaving, setIsLeaving] = React.useState(false);
     const [preOrders, setPreOrders] = React.useState([]);
+    const [igStoryDiscount, setIgStoryDiscount] = React.useState(false);
+
+    // Discount calculation helpers
+    const isDrink = (product) => product?.category === 'Drinks and Desserts';
+    const isMain = (product) => product?.category === 'Meals';
+
+    const cartItems = React.useMemo(() => {
+        const byId = new Map(products.map((p) => [p.id, p]));
+        return Array.from(cart.entries())
+            .map(([productId, quantity]) => ({
+                product: byId.get(productId),
+                productId,
+                quantity,
+            }))
+            .filter((x) => x.product);
+    }, [cart, products]);
+
+    const cartTotalCents = React.useMemo(() => {
+        return cartItems.reduce(
+            (sum, x) => sum + centsFromCartLine(x.product, x.quantity),
+            0,
+        );
+    }, [cartItems]);
+
+    // Calculate Main + Drink discount (20 pesos off per pair)
+    const mainDrinkDiscount = React.useMemo(() => {
+        const mainsTotal = cartItems.filter(x => isMain(x.product)).reduce((sum, x) => sum + x.quantity, 0);
+        const drinksTotal = cartItems.filter(x => isDrink(x.product)).reduce((sum, x) => sum + x.quantity, 0);
+        const pairs = Math.min(mainsTotal, drinksTotal);
+        return pairs * 20;
+    }, [cartItems]);
+
+    // Calculate IG Story discount (5% off most expensive item)
+    const igStoryDiscountAmount = React.useMemo(() => {
+        if (!igStoryDiscount || cartItems.length === 0) return 0;
+        const maxPrice = Math.max(...cartItems.map(x => x.product?.price_pesos ?? 0));
+        return Math.round(maxPrice * 0.05);
+    }, [cartItems, igStoryDiscount]);
+
+    // Total discount amount
+    const totalDiscount = React.useMemo(() => {
+        return mainDrinkDiscount + igStoryDiscountAmount;
+    }, [mainDrinkDiscount, igStoryDiscountAmount]);
+
+    // Final total after discounts
+    const finalTotal = cartTotalCents - totalDiscount;
 
     React.useEffect(() => {
         let isMounted = true;
@@ -329,17 +388,6 @@ function FrontDesk() {
         setProducts((prev) => prev.map((p) => (p.id === product.id ? r.data : p)));
     }
 
-    const cartItems = React.useMemo(() => {
-        const byId = new Map(products.map((p) => [p.id, p]));
-        return Array.from(cart.entries())
-            .map(([productId, quantity]) => ({
-                product: byId.get(productId),
-                productId,
-                quantity,
-            }))
-            .filter((x) => x.product);
-    }, [cart, products]);
-
     const visibleProducts = React.useMemo(() => {
         return products;
     }, [products]);
@@ -360,13 +408,6 @@ function FrontDesk() {
         }
         return map;
     }, [visibleProducts]);
-
-    const cartTotalCents = React.useMemo(() => {
-        return cartItems.reduce(
-            (sum, x) => sum + centsFromCartLine(x.product, x.quantity),
-            0,
-        );
-    }, [cartItems]);
 
     React.useEffect(() => {
     if (!toastMessage) {
@@ -420,15 +461,21 @@ function FrontDesk() {
             note: note.trim() ? note.trim() : null,
             order_type: orderType,
             table_number: orderType === 'dine_in' ? orderDetail.trim() || null : null,
-            payment_mode: paymentMode,
             customer_name: orderType === 'takeout' ? orderDetail.trim() || null : null,
             payment_mode: paymentMode,
             items: cartItems.map((x) => ({
                 product: x.product,
                 productId: x.productId,
                 quantity: x.quantity,
+                is_free: false,
             })),
-            total: cartTotalCents,
+            total: finalTotal,
+            subtotal: cartTotalCents,
+            discount_amount: totalDiscount,
+            discount_details: {
+                main_drink_combo: mainDrinkDiscount,
+                ig_story: igStoryDiscountAmount,
+            },
         };
     }
 
@@ -450,7 +497,12 @@ function FrontDesk() {
                 items: orderPreview.items.map((x) => ({
                     product_id: x.productId,
                     quantity: x.quantity,
+                    is_free: x.is_free || false,
                 })),
+                total: orderPreview.total,
+                subtotal: orderPreview.subtotal,
+                discount_amount: orderPreview.discount_amount,
+                discount_details: orderPreview.discount_details,
             };
 
             const r = await window.axios.post('/api/orders', payload);
@@ -494,7 +546,12 @@ function FrontDesk() {
                 items: orderPreview.items.map((x) => ({
                     product_id: x.productId,
                     quantity: x.quantity,
+                    is_free: x.is_free || false,
                 })),
+                total: orderPreview.total,
+                subtotal: orderPreview.subtotal,
+                discount_amount: orderPreview.discount_amount,
+                discount_details: orderPreview.discount_details,
             };
 
             await window.axios.post('/api/orders', payload);
@@ -708,13 +765,57 @@ function FrontDesk() {
                                 <button type="button" onClick={() => setPaymentMode('gcash')} className={`flex-1 rounded-lg py-2 text-xs lg:text-sm font-bold transition-all ${paymentMode === 'gcash' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>GCash</button>
                             </div>
                         </div>
+
+                        {/* Discounts Section */}
+                        {cartItems.length > 0 && (
+                            <div className="pb-2 space-y-2">
+                                <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">Discounts & Promos</label>
+                                
+                                {/* IG Story Discount */}
+                                <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:bg-slate-100 transition">
+                                    <input
+                                        type="checkbox"
+                                        checked={igStoryDiscount}
+                                        onChange={(e) => setIgStoryDiscount(e.target.checked)}
+                                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                    />
+                                    <span className="text-xs lg:text-sm font-medium text-slate-700">IG Story (5% off most expensive item)</span>
+                                    {igStoryDiscountAmount > 0 && (
+                                        <span className="ml-auto text-xs font-bold text-emerald-600">-{currencyFromPesos(igStoryDiscountAmount)}</span>
+                                    )}
+                                </label>
+                            </div>
+                        )}
                     </div>
 
                     {/* Rigid Bottom Section */}
                     <div className="border-t border-slate-100 pt-3 lg:pt-4 mt-2 flex-none">
+                        {/* Discounts breakdown */}
+                        {totalDiscount > 0 && (
+                            <div className="mb-3 p-2 rounded-lg bg-emerald-50 border border-emerald-100">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 mb-1">Discounts Applied</div>
+                                {mainDrinkDiscount > 0 && (
+                                    <div className="flex justify-between text-xs text-emerald-700">
+                                        <span>Main + Drink Combo</span>
+                                        <span>-{currencyFromPesos(mainDrinkDiscount)}</span>
+                                    </div>
+                                )}
+                                {igStoryDiscountAmount > 0 && (
+                                    <div className="flex justify-between text-xs text-emerald-700">
+                                        <span>IG Story Discount</span>
+                                        <span>-{currencyFromPesos(igStoryDiscountAmount)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                         <div className="flex items-center justify-between mb-4 lg:mb-6">
                             <span className="text-slate-500 text-xs lg:text-sm font-medium uppercase tracking-widest">Total</span>
-                            <span className="text-xl lg:text-2xl font-black text-slate-900">{currencyFromPesos(cartTotalCents)}</span>
+                            <div className="text-right">
+                                {totalDiscount > 0 && (
+                                    <span className="text-xs text-slate-400 line-through mr-2">{currencyFromPesos(cartTotalCents)}</span>
+                                )}
+                                <span className="text-xl lg:text-2xl font-black text-slate-900">{currencyFromPesos(finalTotal)}</span>
+                            </div>
                         </div>
                         <div className="space-y-2 lg:space-y-3">
                             <button type="button" disabled={cartItems.length === 0 || isSubmitting || !orderType || !orderDetail.trim() || !paymentMode} onClick={() => openConfirm('send')} className="w-full rounded-2xl bg-emerald-600 py-3 lg:py-4 text-base lg:text-lg font-bold text-white shadow-lg shadow-emerald-200 disabled:opacity-40 active:scale-[0.98] transition-all">
@@ -786,9 +887,27 @@ function FrontDesk() {
                                     ))}
                                 </div>
 
+                                {/* Discounts in confirmation */}
+                                {totalDiscount > 0 && (
+                                    <div className="mt-3 pt-3 border-t border-slate-200 space-y-1">
+                                        {mainDrinkDiscount > 0 && (
+                                            <div className="flex justify-between text-xs text-emerald-600">
+                                                <span>Main + Drink Combo</span>
+                                                <span>-{currencyFromPesos(mainDrinkDiscount)}</span>
+                                            </div>
+                                        )}
+                                        {igStoryDiscountAmount > 0 && (
+                                            <div className="flex justify-between text-xs text-emerald-600">
+                                                <span>IG Story Discount</span>
+                                                <span>-{currencyFromPesos(igStoryDiscountAmount)}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-4 text-sm font-black text-slate-900">
                                     <span>Total</span>
-                                    <span>{currencyFromPesos(cartTotalCents)}</span>
+                                    <span>{currencyFromPesos(finalTotal)}</span>
                                 </div>
                             </div>
 
@@ -1000,7 +1119,14 @@ function FrontStatus() {
                                 <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-white">
                                     <div className="flex flex-col">
                                         <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Order</span>
-                                        <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
+                                            {o.discount_amount > 0 && (
+                                                <span className="inline-flex items-center rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                                                    % OFF
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     {orderStatusBadge(o.status, index)}
                                 </div>
@@ -1069,14 +1195,23 @@ function FrontStatus() {
                                     </div>
 
                                     {/* Total Section - Now sits firmly below the scrollable area */}
-                                    <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4 text-sm font-black text-slate-900">
-                                        <span className="uppercase tracking-widest text-[10px] text-slate-400">Total</span>
-                                        <span>{currencyFromPesos(
-                                            (o.items ?? []).reduce(
-                                                (sum, it) => sum + centsFromCartLine(it.product, it.quantity),
-                                                0,
-                                            )
-                                        )}</span>
+                                    <div className="mt-4 border-t border-slate-100 pt-4 space-y-1.5">
+                                        {o.discount_amount > 0 && (
+                                            <>
+                                                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                                                    <span>Subtotal</span>
+                                                    <span>{currencyFromPesos(o.subtotal ?? (o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between text-[11px] text-emerald-600 font-bold">
+                                                    <span>Discount</span>
+                                                    <span>-{currencyFromPesos(o.discount_amount)}</span>
+                                                </div>
+                                            </>
+                                        )}
+                                        <div className="flex items-center justify-between text-sm font-black text-slate-900">
+                                            <span className="uppercase tracking-widest text-[10px] text-slate-400">Total</span>
+                                            <span>{currencyFromPesos(o.total ?? (o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}</span>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -1355,7 +1490,14 @@ function OrderHistory({ mode }) {
                                 <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-white">
                                     <div className="flex flex-col">
                                         <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Order</span>
-                                        <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl font-black text-slate-900 leading-none">{getOrderLabel(o)}</span>
+                                            {o.discount_amount > 0 && (
+                                                <span className="inline-flex items-center rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                                                    % OFF
+                                                </span>
+                                            )}
+                                        </div>
                                         <span className="text-[11px] text-slate-600 mt-1">{formatOrderDateTime(o.completed_at ?? o.created_at)}</span>
                                     </div>
                                     {orderStatusBadge(o.status, index)}
@@ -1471,11 +1613,25 @@ function OrderHistory({ mode }) {
                                 
                                 {/* Summary Footer with Grand Total */}
                                 <div className="mt-auto p-5 bg-slate-50 border-t border-slate-100 space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-                                        <span className="text-lg font-black text-slate-900">
-                                            {currencyFromPesos((o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}
-                                        </span>
+                                    <div className="space-y-1">
+                                        {o.discount_amount > 0 && (
+                                            <>
+                                                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                                                    <span>Subtotal</span>
+                                                    <span>{currencyFromPesos(o.subtotal ?? (o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}</span>
+                                                </div>
+                                                <div className="flex items-center justify-between text-[11px] text-emerald-600 font-bold">
+                                                    <span>Discount</span>
+                                                    <span>-{currencyFromPesos(o.discount_amount)}</span>
+                                                </div>
+                                            </>
+                                        )}
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</span>
+                                            <span className="text-lg font-black text-slate-900">
+                                                {currencyFromPesos(o.total ?? (o.items ?? []).reduce((sum, it) => sum + centsFromCartLine(it.product, it.quantity), 0))}
+                                            </span>
+                                        </div>
                                     </div>
                                     <button
                                         type="button"

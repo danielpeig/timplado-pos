@@ -14,6 +14,10 @@ class OrderItem extends Model
         'is_done',
     ];
 
+    protected $casts = [
+        'is_done' => 'boolean',
+    ];
+
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
