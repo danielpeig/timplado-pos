@@ -1766,6 +1766,17 @@ function KitchenAnalytics() {
     // Exclude archived orders from analytics
     const completedOrders = orders.filter((order) => (order.status === 'done' || order.status === 'completed') && order.status !== 'archived');
     
+    // Helper to get effective total (handles legacy orders without 'total' field)
+    const getOrderTotal = (order) => {
+        if (order.total && order.total > 0) return order.total;
+        
+        // Fallback for legacy orders: sum of items
+        return (order.items ?? []).reduce(
+            (sum, item) => sum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+            0
+        );
+    };
+
     const orderItems = completedOrders.flatMap((order) =>
         (order.items ?? []).map((item) => ({
             ...item,
@@ -1774,8 +1785,8 @@ function KitchenAnalytics() {
         })),
     );
 
-    const grossRevenue = orderItems.reduce(
-        (sum, item) => sum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
+    const grossRevenue = completedOrders.reduce(
+        (sum, order) => sum + getOrderTotal(order),
         0,
     );
 
@@ -1787,10 +1798,7 @@ function KitchenAnalytics() {
             const completedAt = order.completed_at ? new Date(order.completed_at) : null;
             if (!completedAt || completedAt.getHours() !== hour) return sum;
 
-            return sum + (order.items ?? []).reduce(
-                (itemSum, item) => itemSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
-                0,
-            );
+            return sum + getOrderTotal(order);
         }, 0);
 
         return {
@@ -1824,11 +1832,7 @@ function KitchenAnalytics() {
         const ordersByMethod = completedOrders.filter((order) => order.payment_mode === method);
         
         const total = ordersByMethod.reduce(
-            (sum, order) =>
-                sum + (order.items ?? []).reduce(
-                    (orderSum, item) => orderSum + ((item.product?.price_pesos ?? 0) * (item.quantity ?? 0)),
-                    0,
-                ),
+            (sum, order) => sum + getOrderTotal(order),
             0,
         );
 
@@ -1839,18 +1843,66 @@ function KitchenAnalytics() {
         };
     });
 
+    // Calculate per-product discounts across all completed orders for Net Profit
+    const productDiscounts = {}; // productId -> totalDiscountAmount
+
+    completedOrders.forEach((order) => {
+        const details = order.discount_details;
+        if (!details) return;
+
+        const items = order.items ?? [];
+        
+        // 1. Handle Main + Drink combo discount (split 10-10)
+        if (details.main_drink_combo > 0) {
+            const mains = items.filter(it => it.product?.category === 'Meals');
+            const drinks = items.filter(it => it.product?.category === 'Drinks and Desserts');
+            
+            const mainsQty = mains.reduce((s, it) => s + it.quantity, 0);
+            const drinksQty = drinks.reduce((s, it) => s + it.quantity, 0);
+            const pairs = Math.min(mainsQty, drinksQty);
+            
+            if (pairs > 0) {
+                const totalMainDiscount = pairs * 10;
+                const totalDrinkDiscount = pairs * 10;
+                
+                mains.forEach(it => {
+                    const pid = it.product_id;
+                    productDiscounts[pid] = (productDiscounts[pid] || 0) + (totalMainDiscount * (it.quantity / mainsQty));
+                });
+                
+                drinks.forEach(it => {
+                    const pid = it.product_id;
+                    productDiscounts[pid] = (productDiscounts[pid] || 0) + (totalDrinkDiscount * (it.quantity / drinksQty));
+                });
+            }
+        }
+
+        // 2. Handle IG Story discount (5% of most expensive item)
+        if (details.ig_story > 0) {
+            const maxPrice = Math.max(...items.map(it => it.product?.price_pesos ?? 0));
+            const maxPriceItems = items.filter(it => it.product?.price_pesos === maxPrice);
+            const totalMaxQty = maxPriceItems.reduce((s, it) => s + it.quantity, 0);
+            
+            maxPriceItems.forEach(it => {
+                const pid = it.product_id;
+                productDiscounts[pid] = (productDiscounts[pid] || 0) + (details.ig_story * (it.quantity / totalMaxQty));
+            });
+        }
+    });
+
     const inventoryRows = products
         .map((product) => {
             const qtySold = orderItems
                 .filter((item) => item.product_id === product.id)
                 .reduce((sum, item) => sum + (item.quantity ?? 0), 0);
             const netSales = qtySold * (product.price_pesos ?? 0);
+            const discount = productDiscounts[product.id] ?? 0;
 
             return {
                 ...product,
                 qtySold,
                 netSales,
-                netProfit: netSales,
+                netProfit: netSales - discount,
             };
         })
         .filter((product) => product.qtySold > 0);
