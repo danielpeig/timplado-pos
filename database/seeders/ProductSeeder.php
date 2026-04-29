@@ -22,7 +22,7 @@ class ProductSeeder extends Seeder
             // Meals
             ['name' => 'Chicken Inasal Tanglad Rice', 'price_pesos' => 170, 'category' => 'Meals', 'sort_order' => 50, 'image_url' => '/images/inasal.png'],
             ['name' => 'Sinaing na Tilapia', 'price_pesos' => 160, 'category' => 'Meals', 'sort_order' => 60, 'image_url' => '/images/tilapia.png'],
-            ['name' => 'Pork HumBuns', 'price_pesos' => null, 'category' => 'Meals', 'sort_order' => 70, 'image_url' => '/images/banme.png'],
+            ['name' => 'Pork HumBuns', 'price_pesos' => 99, 'category' => 'Meals', 'sort_order' => 70, 'image_url' => '/images/banme.png'],
 
             // Add Ons
             ['name' => 'Sea Salt Cream', 'price_pesos' => 10, 'category' => 'Add Ons', 'sort_order' => 80],
