@@ -1906,12 +1906,6 @@ function KitchenAnalytics() {
                                             </div>
                                             <p className="text-sm font-black text-white">{currencyFromPesos(payment.total)}</p>
                                         </div>
-                                        {/* <div className="mt-3 h-1 w-full bg-slate-800 rounded-full overflow-hidden">
-                                            <div 
-                                                className="h-full bg-emerald-500 transition-all duration-500" 
-                                                style={{ width: payment.method === 'cash' ? '70%' : '30%' }} 
-                                            />
-                                        </div> */}
                                     </div>
                                 ))}
                             </div>

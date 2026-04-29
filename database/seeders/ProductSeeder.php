@@ -14,8 +14,8 @@ class ProductSeeder extends Seeder
     {
         $items = [
             // Drinks and Desserts
-            ['name' => 'Ube Coconut Refresher', 'price_pesos' => 120, 'category' => 'Drinks and Desserts', 'sort_order' => 10, 'image_url' => '/images/uberefresh.png'],
-            ['name' => 'Ube Coconut Latte', 'price_pesos' => 125, 'category' => 'Drinks and Desserts', 'sort_order' => 20, 'image_url' => '/images/ubelatte.png'],
+            ['name' => 'Ube Refresher', 'price_pesos' => 120, 'category' => 'Drinks and Desserts', 'sort_order' => 10, 'image_url' => '/images/uberefresh.png'],
+            ['name' => 'Ube Latte', 'price_pesos' => 125, 'category' => 'Drinks and Desserts', 'sort_order' => 20, 'image_url' => '/images/ubelatte.png'],
             ['name' => 'Cucumber Calamansi Juice', 'price_pesos' => 90, 'category' => 'Drinks and Desserts', 'sort_order' => 30, 'image_url' => '/images/cucumber.png'],
             ['name' => 'Putli Mandi', 'price_pesos' => 85, 'category' => 'Drinks and Desserts', 'sort_order' => 40, 'image_url' => '/images/putliman.png'],
 
