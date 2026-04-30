@@ -277,10 +277,21 @@ function FrontDesk() {
     const [isLeaving, setIsLeaving] = React.useState(false);
     const [preOrders, setPreOrders] = React.useState([]);
     const [igStoryDiscount, setIgStoryDiscount] = React.useState(false);
+    const [mainDrinkDiscountActive, setMainDrinkDiscountActive] = React.useState(false);
 
     // Discount calculation helpers
-    const isDrink = (product) => product?.category === 'Drinks and Desserts';
-    const isMain = (product) => product?.category === 'Meals';
+    const isDrink = (product) => {
+        if (!product) return false;
+        const isDrinkCategory = product.category === 'Drinks and Desserts';
+        const isNotDessert = !product.name?.toLowerCase().includes('putli mandi');
+        return isDrinkCategory && isNotDessert;
+    };
+    const isMain = (product) => {
+        if (!product) return false;
+        const isMainCategory = product.category === 'Meals';
+        const isNotExcluded = !product.name?.toLowerCase().includes('pork humbuns');
+        return isMainCategory && isNotExcluded;
+    };
 
     const cartItems = React.useMemo(() => {
         const byId = new Map(products.map((p) => [p.id, p]));
@@ -300,20 +311,27 @@ function FrontDesk() {
         );
     }, [cartItems]);
 
+    // Check if eligible for Main + Drink combo
+    const isComboEligible = React.useMemo(() => {
+        const mainsTotal = cartItems.filter(x => isMain(x.product)).reduce((sum, x) => sum + x.quantity, 0);
+        const drinksTotal = cartItems.filter(x => isDrink(x.product)).reduce((sum, x) => sum + x.quantity, 0);
+        return mainsTotal > 0 && drinksTotal > 0;
+    }, [cartItems]);
+
     // Calculate Main + Drink discount (20 pesos off per pair)
     const mainDrinkDiscount = React.useMemo(() => {
+        if (!mainDrinkDiscountActive || !isComboEligible) return 0;
         const mainsTotal = cartItems.filter(x => isMain(x.product)).reduce((sum, x) => sum + x.quantity, 0);
         const drinksTotal = cartItems.filter(x => isDrink(x.product)).reduce((sum, x) => sum + x.quantity, 0);
         const pairs = Math.min(mainsTotal, drinksTotal);
         return pairs * 20;
-    }, [cartItems]);
+    }, [cartItems, mainDrinkDiscountActive, isComboEligible]);
 
-    // Calculate IG Story discount (5% off most expensive item)
+    // Calculate IG Story discount (5% off overall total)
     const igStoryDiscountAmount = React.useMemo(() => {
-        if (!igStoryDiscount || cartItems.length === 0) return 0;
-        const maxPrice = Math.max(...cartItems.map(x => x.product?.price_pesos ?? 0));
-        return Math.round(maxPrice * 0.05);
-    }, [cartItems, igStoryDiscount]);
+        if (!igStoryDiscount || cartTotalCents <= 0) return 0;
+        return Math.round(cartTotalCents * 0.05);
+    }, [igStoryDiscount, cartTotalCents]);
 
     // Total discount amount
     const totalDiscount = React.useMemo(() => {
@@ -322,6 +340,13 @@ function FrontDesk() {
 
     // Final total after discounts
     const finalTotal = cartTotalCents - totalDiscount;
+
+    // Reset optional discounts if no longer eligible
+    React.useEffect(() => {
+        if (!isComboEligible) {
+            setMainDrinkDiscountActive(false);
+        }
+    }, [isComboEligible]);
 
     React.useEffect(() => {
         let isMounted = true;
@@ -473,8 +498,8 @@ function FrontDesk() {
             subtotal: cartTotalCents,
             discount_amount: totalDiscount,
             discount_details: {
-                main_drink_combo: mainDrinkDiscount,
-                ig_story: igStoryDiscountAmount,
+                main_drink_combo: mainDrinkDiscountActive ? mainDrinkDiscount : 0,
+                ig_story: igStoryDiscount ? igStoryDiscountAmount : 0,
             },
         };
     }
@@ -771,6 +796,30 @@ function FrontDesk() {
                             <div className="pb-2 space-y-2">
                                 <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">Discounts & Promos</label>
                                 
+                                {/* Main + Drink Combo Discount */}
+                                <label className={`flex items-center gap-2 p-2 rounded-lg border transition ${
+                                    isComboEligible 
+                                        ? 'border-slate-200 bg-slate-50 cursor-pointer hover:bg-slate-100' 
+                                        : 'border-slate-100 bg-slate-50/50 cursor-not-allowed opacity-50'
+                                }`}>
+                                    <input
+                                        type="checkbox"
+                                        checked={mainDrinkDiscountActive}
+                                        disabled={!isComboEligible}
+                                        onChange={(e) => setMainDrinkDiscountActive(e.target.checked)}
+                                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
+                                    />
+                                    <div className="flex flex-col">
+                                        <span className="text-xs lg:text-sm font-medium text-slate-700">Main + Drink Combo</span>
+                                        {!isComboEligible && (
+                                            <span className="text-[10px] text-slate-400 font-normal">Add a meal and a drink to unlock</span>
+                                        )}
+                                    </div>
+                                    {mainDrinkDiscountActive && mainDrinkDiscount > 0 && (
+                                        <span className="ml-auto text-xs font-bold text-emerald-600">-{currencyFromPesos(mainDrinkDiscount)}</span>
+                                    )}
+                                </label>
+
                                 {/* IG Story Discount */}
                                 <label className="flex items-center gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer hover:bg-slate-100 transition">
                                     <input
@@ -779,7 +828,7 @@ function FrontDesk() {
                                         onChange={(e) => setIgStoryDiscount(e.target.checked)}
                                         className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                                     />
-                                    <span className="text-xs lg:text-sm font-medium text-slate-700">IG Story (5% off most expensive item)</span>
+                                    <span className="text-xs lg:text-sm font-medium text-slate-700">IG Story (5% off total)</span>
                                     {igStoryDiscountAmount > 0 && (
                                         <span className="ml-auto text-xs font-bold text-emerald-600">-{currencyFromPesos(igStoryDiscountAmount)}</span>
                                     )}
@@ -1854,8 +1903,16 @@ function KitchenAnalytics() {
         
         // 1. Handle Main + Drink combo discount (split 10-10)
         if (details.main_drink_combo > 0) {
-            const mains = items.filter(it => it.product?.category === 'Meals');
-            const drinks = items.filter(it => it.product?.category === 'Drinks and Desserts');
+            const mains = items.filter(it => {
+                const isMainCategory = it.product?.category === 'Meals';
+                const isNotExcluded = !it.product?.name?.toLowerCase().includes('pork humbuns');
+                return isMainCategory && isNotExcluded;
+            });
+            const drinks = items.filter(it => {
+                const isDrinkCategory = it.product?.category === 'Drinks and Desserts';
+                const isNotDessert = !it.product?.name?.toLowerCase().includes('putli mandi');
+                return isDrinkCategory && isNotDessert;
+            });
             
             const mainsQty = mains.reduce((s, it) => s + it.quantity, 0);
             const drinksQty = drinks.reduce((s, it) => s + it.quantity, 0);
@@ -1877,16 +1934,16 @@ function KitchenAnalytics() {
             }
         }
 
-        // 2. Handle IG Story discount (5% of most expensive item)
+        // 2. Handle IG Story discount (flat 20 pesos, split across all items proportional to their price)
         if (details.ig_story > 0) {
-            const maxPrice = Math.max(...items.map(it => it.product?.price_pesos ?? 0));
-            const maxPriceItems = items.filter(it => it.product?.price_pesos === maxPrice);
-            const totalMaxQty = maxPriceItems.reduce((s, it) => s + it.quantity, 0);
-            
-            maxPriceItems.forEach(it => {
-                const pid = it.product_id;
-                productDiscounts[pid] = (productDiscounts[pid] || 0) + (details.ig_story * (it.quantity / totalMaxQty));
-            });
+            const orderSubtotal = items.reduce((s, it) => s + ((it.product?.price_pesos ?? 0) * (it.quantity ?? 0)), 0);
+            if (orderSubtotal > 0) {
+                items.forEach(it => {
+                    const pid = it.product_id;
+                    const itemTotal = (it.product?.price_pesos ?? 0) * (it.quantity ?? 0);
+                    productDiscounts[pid] = (productDiscounts[pid] || 0) + (details.ig_story * (itemTotal / orderSubtotal));
+                });
+            }
         }
     });
 
