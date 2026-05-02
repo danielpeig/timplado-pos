@@ -76,10 +76,11 @@ function buildOrderSlipHtml(order) {
   body { 
     font-family: ui-sans-serif, system-ui, sans-serif; 
     color: #111; 
-    padding: 2mm;
-    width: 36mm;
+    padding: 4mm 3mm;
+    width: 80mm;
     font-size: 10px;
-    line-height: 1.2;
+    line-height: 1.5;
+    margin: 0 auto;
   }
   h1, h2, h3, p, div { margin: 0; }
   h1 { font-size: 14px; margin-bottom: 4px; }
@@ -93,7 +94,11 @@ function buildOrderSlipHtml(order) {
   .note { margin-top: 6px; font-size: 9px; color: #444; }
   .small { margin-top: 8px; font-size: 8px; color: #666; }
   @media print {
-    body { padding: 0; margin: 0; }
+    body { 
+      padding: 4mm 3mm; 
+      margin: 0 auto; 
+      width: 80mm;
+    }
     .no-print { display: none !important; }
   }
 </style>
