@@ -67,23 +67,27 @@ function buildOrderSlipHtml(order) {
 <title>Order Slip ${getOrderLabel(order)}</title>
 <style>
   @page {
-    size: 40mm auto;
+    size: 65mm auto;
     margin: 0;
   }
   * {
     box-sizing: border-box;
   }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: auto;
+  }
   body { 
     font-family: ui-sans-serif, system-ui, sans-serif; 
     color: #111; 
-    padding: 4mm 3mm;
-    width: 80mm;
+    padding: 3mm 4mm;
+    width: 65mm;
     font-size: 10px;
-    line-height: 1.5;
-    margin: 0 auto;
+    line-height: 1.4;
   }
   h1, h2, h3, p, div { margin: 0; }
-  h1 { font-size: 14px; margin-bottom: 4px; }
+  h1 { font-size: 14px; margin-bottom: 4px;}
   .meta { margin-bottom: 8px; }
   .meta div { margin-bottom: 2px; font-size: 9px; }
   table { width: 100%; border-collapse: collapse; margin-top: 4px; }
@@ -95,9 +99,10 @@ function buildOrderSlipHtml(order) {
   .small { margin-top: 8px; font-size: 8px; color: #666; }
   @media print {
     body { 
-      padding: 4mm 3mm; 
-      margin: 0 auto; 
-      width: 80mm;
+      padding: 3mm 4mm; 
+      margin: 0; 
+      width: 65mm;
+      height: auto;
     }
     .no-print { display: none !important; }
   }
