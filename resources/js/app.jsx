@@ -1827,7 +1827,7 @@ function KitchenAnalytics() {
     
     // Helper to get effective total (handles legacy orders without 'total' field)
     const getOrderTotal = (order) => {
-        if (order.total && order.total > 0) return order.total;
+        if (order.total && order.total > 0) return Number(order.total);
         
         // Fallback for legacy orders: sum of items
         return (order.items ?? []).reduce(
