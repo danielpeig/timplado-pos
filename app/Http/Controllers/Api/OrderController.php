@@ -115,6 +115,9 @@ class OrderController extends Controller
             'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled,archived'],
             'note' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'payment_mode' => ['sometimes', 'string', 'in:cash,gcash'],
+            'order_type' => ['sometimes', 'string', 'in:dine_in,takeout'],
+            'table_number' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
         if (empty($data)) {
@@ -141,6 +144,28 @@ class OrderController extends Controller
 
         if (array_key_exists('payment_mode', $data)) {
             $update['payment_mode'] = $data['payment_mode'];
+        }
+
+        if (array_key_exists('order_type', $data)) {
+            $update['order_type'] = $data['order_type'];
+            
+            // If changing to dine_in, we might want to clear customer_name if not provided
+            if ($data['order_type'] === 'dine_in') {
+                $update['customer_name'] = null;
+                if (array_key_exists('table_number', $data)) {
+                    $update['table_number'] = $data['table_number'];
+                }
+            } else {
+                // If changing to takeout, clear table_number
+                $update['table_number'] = null;
+                if (array_key_exists('customer_name', $data)) {
+                    $update['customer_name'] = $data['customer_name'];
+                }
+            }
+        } elseif (array_key_exists('table_number', $data)) {
+            $update['table_number'] = $data['table_number'];
+        } elseif (array_key_exists('customer_name', $data)) {
+            $update['customer_name'] = $data['customer_name'];
         }
 
         $order->update($update);

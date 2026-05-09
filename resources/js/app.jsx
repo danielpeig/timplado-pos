@@ -208,7 +208,7 @@ function ModeSelect() {
 
                 {/* Footer hint */}
                 <footer className="mt-12 text-xs text-slate-400 font-medium uppercase tracking-widest">
-                    System Beta
+                    Made for Teamplado
                 </footer>
             </div>
         </div>
@@ -1045,6 +1045,10 @@ function FrontStatus() {
     const [isLeaving, setIsLeaving] = React.useState(false);
     const [isLoading, setIsLoading] = React.useState(true);
     const [lastInvoiceOrder, setLastInvoiceOrder] = React.useState(null);
+    const [showNoteModal, setShowNoteModal] = React.useState(false);
+    const [activeOrderForNote, setActiveOrderForNote] = React.useState(null);
+    const [noteDraft, setNoteDraft] = React.useState('');
+    const [isSavingNote, setIsSavingNote] = React.useState(false);
 
     React.useEffect(() => {
         if (!toastMessage) {
@@ -1076,6 +1080,35 @@ function FrontStatus() {
     }
 
     const cancelingOrder = orders.find((o) => o.id === cancelingOrderId) ?? null;
+
+    function openNoteModal(order) {
+        setActiveOrderForNote(order);
+        setNoteDraft(order.note ?? '');
+        setShowNoteModal(true);
+    }
+
+    function closeNoteModal() {
+        setShowNoteModal(false);
+        setActiveOrderForNote(null);
+        setNoteDraft('');
+    }
+
+    async function saveOrderNote() {
+        if (!activeOrderForNote) return;
+        setIsSavingNote(true);
+        try {
+            const r = await window.axios.patch(`/api/orders/${activeOrderForNote.id}/status`, {
+                note: noteDraft.trim() ? noteDraft.trim() : null,
+            });
+            setOrders((prev) => prev.map((o) => (o.id === activeOrderForNote.id ? r.data : o)));
+            setToastMessage(`Note updated for ${getOrderLabel(r.data)}`);
+            closeNoteModal();
+        } catch (e) {
+            setError(e?.response?.data?.message ?? e?.message ?? 'Failed to save note');
+        } finally {
+            setIsSavingNote(false);
+        }
+    }
 
     React.useEffect(() => {
         let cancelled = false;
@@ -1299,6 +1332,13 @@ function FrontStatus() {
                                     </button>
                                     <button
                                         type="button"
+                                        onClick={() => openNoteModal(o)}
+                                        className="w-full rounded-2xl bg-white border border-slate-200 py-3 text-[11px] font-black text-slate-700 shadow-sm transition-all active:scale-95 hover:bg-slate-50"
+                                    >
+                                        ADD/EDIT NOTE
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => setCancelingOrderId(o.id)}
                                         className="w-full rounded-2xl bg-white border border-rose-100 py-3 text-[11px] font-black text-rose-500 shadow-sm transition-all active:scale-95 hover:bg-rose-50"
                                     >
@@ -1322,7 +1362,7 @@ function FrontStatus() {
                                 </svg>
                             </div>
                             <div className="flex flex-col pr-4">
-                                <span className="text-sm font-black text-slate-800 uppercase tracking-tight">Cancelled</span>
+                                <span className="text-sm font-black text-slate-800 uppercase tracking-tight">Success!</span>
                                 <span className="text-xs font-medium text-slate-500">{toastMessage}</span>
                             </div>
                         </div>
@@ -1330,6 +1370,73 @@ function FrontStatus() {
                 </div>
             )}
         </div>
+
+            {showNoteModal && activeOrderForNote && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-black/40" onClick={closeNoteModal} />
+                    <div className="relative w-full max-w-2xl rounded-3xl bg-white border border-slate-200 p-6 shadow-2xl">
+                        <div className="flex items-start justify-between gap-4">
+                            <div>
+                                <h2 className="text-2xl font-bold text-slate-900">
+                                    Edit Order Note
+                                </h2>
+                                <p className="mt-2 text-sm text-slate-500">
+                                    Edit the existing note for this order. This will reflect on the kitchen side immediately.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeNoteModal}
+                                className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                            <div className="grid grid-cols-2 gap-4 text-sm text-slate-600">
+                                <div>
+                                    <div className="font-semibold text-slate-900">Order</div>
+                                    <div>{getOrderLabel(activeOrderForNote)}</div>
+                                </div>
+                                <div>
+                                    <div className="font-semibold text-slate-900">Placed</div>
+                                    <div>{formatOrderDateTime(activeOrderForNote.created_at)}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6">
+                            <label className="block text-sm font-semibold text-slate-900 mb-2">Kitchen note</label>
+                            <textarea
+                                value={noteDraft}
+                                onChange={(e) => setNoteDraft(e.target.value)}
+                                rows={4}
+                                className="w-full rounded-3xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200"
+                                placeholder="Add special instructions for the kitchen..."
+                            />
+                        </div>
+
+                        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                            <button
+                                type="button"
+                                onClick={closeNoteModal}
+                                className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={saveOrderNote}
+                                disabled={isSavingNote}
+                                className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-200 disabled:opacity-50"
+                            >
+                                {isSavingNote ? 'Saving…' : 'Save Note'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {cancelingOrder ? (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1397,6 +1504,11 @@ function OrderHistory({ mode }) {
     const [tempPaymentMode, setTempPaymentMode] = React.useState('');
     const [updatingPayment, setUpdatingPayment] = React.useState(null);
 
+    const [editingOrderType, setEditingOrderType] = React.useState(null);
+    const [tempOrderType, setTempOrderType] = React.useState('');
+    const [tempOrderDetail, setTempOrderDetail] = React.useState('');
+    const [updatingOrderType, setUpdatingOrderType] = React.useState(null);
+
     const handleUpdatePaymentMode = async (orderId) => {
         if (!tempPaymentMode) return;
         setUpdatingPayment(orderId);
@@ -1411,6 +1523,31 @@ function OrderHistory({ mode }) {
             setError('Failed to update payment mode.');
         } finally {
             setUpdatingPayment(null);
+        }
+    };
+
+    const handleUpdateOrderType = async (orderId) => {
+        if (!tempOrderType) return;
+        setUpdatingOrderType(orderId);
+        try {
+            const payload = {
+                order_type: tempOrderType,
+            };
+            if (tempOrderType === 'dine_in') {
+                payload.table_number = tempOrderDetail;
+            } else {
+                payload.customer_name = tempOrderDetail;
+            }
+
+            const r = await window.axios.patch(`/api/orders/${orderId}/status`, payload);
+            setOrders((prev) => prev.map((o) => (o.id === orderId ? r.data : o)));
+            setEditingOrderType(null);
+            setTempOrderType('');
+            setTempOrderDetail('');
+        } catch (e) {
+            setError('Failed to update order type.');
+        } finally {
+            setUpdatingOrderType(null);
         }
     };
 
@@ -1565,19 +1702,68 @@ function OrderHistory({ mode }) {
                                 {/* Metadata Strip (Type & Customer/Table) */}
                                 {(o.order_type || o.table_number || o.customer_name) && (
                                     <div className="px-5 py-3 border-b border-slate-50 bg-slate-50/30 flex items-center justify-between gap-2">
-                                        {/* Left Side: Order Type and Name/Table */}
-                                        <div className="flex items-center gap-2 overflow-hidden">
-                                            <div className={`inline-flex shrink-0 items-center rounded-lg px-2 py-1 text-[10px] font-black text-white shadow-sm ${
-                                                o.order_type === 'dine_in' 
-                                                    ? 'bg-emerald-500 shadow-emerald-100' 
-                                                    : 'bg-blue-600 shadow-blue-100'
-                                            }`}>
-                                                {o.order_type === 'dine_in' ? '🍽️ DINE IN' : '🛍️ TAKEOUT'}
-                                            </div>
-                                            
-                                            {(o.table_number || o.customer_name) && (
-                                                <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
-                                                    {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
+                                        {/* Left Side: Order Type and Name/Table - Editable */}
+                                        <div className="flex items-center gap-2 overflow-hidden flex-1">
+                                            {editingOrderType === o.id ? (
+                                                <div className="flex flex-col gap-2 w-full">
+                                                    <div className="flex items-center gap-2">
+                                                        <select
+                                                            value={tempOrderType}
+                                                            onChange={(e) => setTempOrderType(e.target.value)}
+                                                            className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md border border-emerald-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                                        >
+                                                            <option value="dine_in">Dine In</option>
+                                                            <option value="takeout">Takeout</option>
+                                                        </select>
+                                                        <input
+                                                            type="text"
+                                                            value={tempOrderDetail}
+                                                            onChange={(e) => setTempOrderDetail(e.target.value)}
+                                                            placeholder={tempOrderType === 'dine_in' ? "Table #" : "Customer Name"}
+                                                            className="flex-1 text-[10px] font-bold px-2 py-1 rounded-md border border-emerald-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                                        />
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleUpdateOrderType(o.id)}
+                                                            disabled={updatingOrderType === o.id}
+                                                            className="flex-1 rounded-md bg-emerald-600 py-1 text-[10px] font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                                                        >
+                                                            {updatingOrderType === o.id ? '...' : 'SAVE'}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => { setEditingOrderType(null); setTempOrderType(''); setTempOrderDetail(''); }}
+                                                            className="flex-1 rounded-md bg-slate-200 py-1 text-[10px] font-black text-slate-600 hover:bg-slate-300"
+                                                        >
+                                                            CANCEL
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div 
+                                                    className="flex items-center gap-2 overflow-hidden cursor-pointer hover:opacity-80 transition"
+                                                    onClick={() => {
+                                                        setEditingOrderType(o.id);
+                                                        setTempOrderType(o.order_type);
+                                                        setTempOrderDetail(o.order_type === 'dine_in' ? (o.table_number ?? '') : (o.customer_name ?? ''));
+                                                    }}
+                                                >
+                                                    <div className={`inline-flex shrink-0 items-center rounded-lg px-2 py-1 text-[10px] font-black text-white shadow-sm ${
+                                                        o.order_type === 'dine_in' 
+                                                            ? 'bg-emerald-500 shadow-emerald-100' 
+                                                            : 'bg-blue-600 shadow-blue-100'
+                                                    }`}>
+                                                        {o.order_type === 'dine_in' ? '🍽️ DINE IN' : '🛍️ TAKEOUT'}
+                                                    </div>
+                                                    
+                                                    {(o.table_number || o.customer_name) && (
+                                                        <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
+                                                            {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
+                                                            <span className="ml-1 text-[10px] text-slate-300">✎</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
