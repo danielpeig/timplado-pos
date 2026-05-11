@@ -27,6 +27,7 @@ class ProductSeeder extends Seeder
             // Add Ons
             ['name' => 'Sea Salt Cream', 'price_pesos' => 10, 'category' => 'Add Ons', 'sort_order' => 80],
             ['name' => 'Cup Holder Packaging', 'price_pesos' => 10, 'category' => 'Add Ons', 'sort_order' => 90],
+            ['name' => 'Timplado Sticker', 'price_pesos' => 20, 'category' => 'Add Ons', 'sort_order' => 95],
             ['name' => 'Stirer', 'price_pesos' => 0, 'category' => 'Add Ons', 'sort_order' => 100],
             ['name' => 'Paper Bag', 'price_pesos' => 0, 'category' => 'Add Ons', 'sort_order' => 110],
         ];

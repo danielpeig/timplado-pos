@@ -3028,8 +3028,7 @@ function KitchenAnalytics() {
                 netSales,
                 netProfit: netSales - discount,
             };
-        })
-        .filter((product) => product.qtySold > 0);
+        });
 
     const sortedInventoryRows = [...inventoryRows].sort((a, b) => {
         if (inventorySort.field === 'category') {
