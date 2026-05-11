@@ -1757,7 +1757,7 @@ function TableStatusManagement() {
             return (
                 order.order_type === 'takeout' &&
                 !order.table_selection &&
-                ['new', 'in_progress', 'done'].includes(order.status)
+                ['new', 'in_progress', 'preorder'].includes(order.status)
             );
         });
     }, [orders]);
@@ -1972,7 +1972,12 @@ function TableStatusManagement() {
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                setClearingOrderInfo({ id: table.orderId, tableNum: table.id, customer: table.customer });
+                                                setClearingOrderInfo({
+                                                    id: table.orderId,
+                                                    tableNum: table.id,
+                                                    customer: table.customer,
+                                                    orderKitchenStatus: table.orderKitchenStatus,
+                                                });
                                             }}
                                             disabled={isClearing === table.orderId}
                                             className="flex-none bg-rose-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded-lg shadow-sm hover:bg-rose-600 active:scale-95 transition-all disabled:opacity-50"
@@ -2017,9 +2022,15 @@ function TableStatusManagement() {
                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Customer</span>
                                 <span className="text-sm font-bold text-slate-700">{clearingOrderInfo.customer || '—'}</span>
                             </div>
-                            <div className="text-[11px] text-slate-500 leading-relaxed font-medium">
-                                Marking this table as available will complete the active order and clear the display.
-                            </div>
+                            {['new', 'in_progress'].includes(clearingOrderInfo.orderKitchenStatus) ? (
+                                <div className="text-[11px] text-rose-600 leading-relaxed font-medium">
+                                    This order is still in the kitchen. Clearing the table will complete it and remove the order from active service.
+                                </div>
+                            ) : (
+                                <div className="text-[11px] text-slate-500 leading-relaxed font-medium">
+                                    Marking this table as available will complete the active order and clear the display.
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex gap-3">
@@ -2050,7 +2061,7 @@ function TableStatusManagement() {
                         <div className="flex items-center justify-between gap-4 mb-6">
                             <div>
                                 <h3 className="text-xl font-black text-slate-800 tracking-tight">Occupy Table {occupyTableTarget.table.id}</h3>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select an active takeout order to seat</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select a kitchen or preorder takeout order to seat</p>
                             </div>
                             <button
                                 type="button"
@@ -2086,8 +2097,8 @@ function TableStatusManagement() {
                                 </div>
                             ) : (
                                 <div className="rounded-3xl bg-slate-50 border border-slate-100 p-6 text-center">
-                                    <p className="text-sm font-bold text-slate-800">No active takeout orders found.</p>
-                                    <p className="mt-2 text-xs text-slate-500">Create a takeout order first, then use this table to seat the customer.</p>
+                                    <p className="text-sm font-bold text-slate-800">No kitchen or preorder takeout orders found.</p>
+                                    <p className="mt-2 text-xs text-slate-500">Only takeout orders still in kitchen or preorders can be seated to a table.</p>
                                 </div>
                             )}
                         </div>
@@ -2193,7 +2204,12 @@ function TableStatusManagement() {
                                     const tableNum = selectedOrderDetails.table_selection?.split('| Table ')[1] || selectedOrderDetails.id;
                                     const customer = selectedOrderDetails.customer_name;
                                     setSelectedOrderDetails(null);
-                                    setClearingOrderInfo({ id: orderId, tableNum, customer });
+                                    setClearingOrderInfo({
+                                        id: orderId,
+                                        tableNum,
+                                        customer,
+                                        orderKitchenStatus: selectedOrderDetails.status,
+                                    });
                                 }}
                                 className="flex-1 px-6 py-4 rounded-2xl bg-rose-50 text-rose-600 text-sm font-black uppercase tracking-widest hover:bg-rose-100 active:scale-95 transition-all"
                             >
