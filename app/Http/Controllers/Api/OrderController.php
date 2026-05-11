@@ -15,7 +15,9 @@ class OrderController extends Controller
     {
         $status = $request->query('status');
         $active = $request->boolean('active');
+        $includePreorders = $request->boolean('include_preorders');
         $analytics = $request->boolean('analytics');
+        $minimal = $request->boolean('minimal');
         $date = $request->query('date');
 
         $query = Order::query()
@@ -26,12 +28,25 @@ class OrderController extends Controller
 
                 return $q->where('status', $status);
             })
-            ->when($active, fn ($q) => $q->whereIn('status', ['new', 'in_progress']))
+            ->when($active, function ($q) use ($includePreorders) {
+                $statuses = ['new', 'in_progress', 'done'];
+                if ($includePreorders) {
+                    $statuses[] = 'preorder';
+                }
+                return $q->whereIn('status', $statuses);
+            })
             ->when($date, fn ($q, $date) => $q->whereDate('completed_at', $date))
             ->when($analytics, fn ($q) => $q->where('status', '!=', 'archived'));
 
         if (! $analytics) {
             $query->limit(200);
+        }
+
+        if ($minimal) {
+            return $query
+                ->select(['id', 'status', 'customer_name', 'table_selection', 'table_number', 'order_type'])
+                ->orderByDesc('id')
+                ->get();
         }
 
         return $query
@@ -46,6 +61,7 @@ class OrderController extends Controller
             'note' => ['nullable', 'string', 'max:2000'],
             'order_type' => ['required', 'string', 'in:dine_in,takeout'],
             'table_number' => ['required_if:order_type,dine_in', 'nullable', 'string', 'max:255'],
+            'table_selection' => ['required_if:order_type,dine_in', 'nullable', 'string', 'max:255'],
             'customer_name' => ['required_if:order_type,takeout', 'nullable', 'string', 'max:255'],
             'payment_mode' => ['required', 'string', 'in:cash,gcash'],
             'status' => ['sometimes', 'string', 'in:new,preorder'],
@@ -70,7 +86,8 @@ class OrderController extends Controller
                     'note' => $data['note'] ?? null,
                     'order_type' => $data['order_type'],
                     'table_number' => $data['order_type'] === 'dine_in' ? ($data['table_number'] ?? null) : null,
-                    'customer_name' => $data['order_type'] === 'takeout' ? ($data['customer_name'] ?? null) : null,
+                    'table_selection' => $data['order_type'] === 'dine_in' ? ($data['table_selection'] ?? null) : null,
+                    'customer_name' => $data['customer_name'] ?? null,
                     'payment_mode' => $data['payment_mode'],
                     'preorder_number' => $preorderNumber,
                     'total' => $data['total'],
@@ -112,11 +129,12 @@ class OrderController extends Controller
     public function updateStatus(Request $request, Order $order)
     {
         $data = $request->validate([
-            'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled,archived'],
+            'status' => ['sometimes', 'string', 'in:new,in_progress,done,cancelled,archived,completed'],
             'note' => ['sometimes', 'nullable', 'string', 'max:2000'],
             'payment_mode' => ['sometimes', 'string', 'in:cash,gcash'],
             'order_type' => ['sometimes', 'string', 'in:dine_in,takeout'],
             'table_number' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'table_selection' => ['sometimes', 'nullable', 'string', 'max:255'],
             'customer_name' => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
@@ -131,7 +149,7 @@ class OrderController extends Controller
         if (array_key_exists('status', $data)) {
             $update['status'] = $data['status'];
 
-            if ($data['status'] === 'done') {
+            if ($data['status'] === 'done' || $data['status'] === 'completed') {
                 $update['completed_at'] = now();
             } elseif ($data['status'] === 'cancelled') {
                 $update['completed_at'] = null;
@@ -149,23 +167,31 @@ class OrderController extends Controller
         if (array_key_exists('order_type', $data)) {
             $update['order_type'] = $data['order_type'];
             
-            // If changing to dine_in, we might want to clear customer_name if not provided
             if ($data['order_type'] === 'dine_in') {
-                $update['customer_name'] = null;
                 if (array_key_exists('table_number', $data)) {
                     $update['table_number'] = $data['table_number'];
                 }
+                if (array_key_exists('table_selection', $data)) {
+                    $update['table_selection'] = $data['table_selection'];
+                }
             } else {
-                // If changing to takeout, clear table_number
+                // If changing to takeout, clear table info
                 $update['table_number'] = null;
+                $update['table_selection'] = null;
                 if (array_key_exists('customer_name', $data)) {
                     $update['customer_name'] = $data['customer_name'];
                 }
             }
-        } elseif (array_key_exists('table_number', $data)) {
-            $update['table_number'] = $data['table_number'];
-        } elseif (array_key_exists('customer_name', $data)) {
-            $update['customer_name'] = $data['customer_name'];
+        } else {
+            if (array_key_exists('table_number', $data)) {
+                $update['table_number'] = $data['table_number'];
+            }
+            if (array_key_exists('table_selection', $data)) {
+                $update['table_selection'] = $data['table_selection'];
+            }
+            if (array_key_exists('customer_name', $data)) {
+                $update['customer_name'] = $data['customer_name'];
+            }
         }
 
         $order->update($update);

@@ -39,6 +39,31 @@ function formatOrderDateTime(createdAtDate) {
     return `${month} ${day} | ${displayHours}:${minutes} ${ampm}`;
 }
 
+const TIME_SLOTS = [
+    { 
+        id: 1, 
+        label: '10:00 AM to 10:45 AM',
+        shortLabel: '10:00-10:45AM',
+        tables: [
+            { id: 1, cap: 6, status: 'Occupied', customer: 'Reyes Family' },
+            { id: 2, cap: 4, status: 'Available', customer: null },
+            { id: 3, cap: 2, status: 'Occupied', customer: 'Solo Diner' },
+            { id: 4, cap: 6, status: 'Available', customer: null },
+        ]
+    },
+    { 
+        id: 2, 
+        label: '11:00 AM to 11:45 AM',
+        shortLabel: '11:00-11:45AM',
+        tables: [
+            { id: 1, cap: 6, status: 'Available', customer: null },
+            { id: 2, cap: 4, status: 'Available', customer: null },
+            { id: 3, cap: 2, status: 'Available', customer: null },
+            { id: 4, cap: 6, status: 'Available', customer: null },
+        ]
+    }
+];
+
 function buildOrderSlipHtml(order) {
     const itemsRows = (order.items ?? [])
         .map((it) => {
@@ -114,7 +139,12 @@ function buildOrderSlipHtml(order) {
     <div><strong>Order: </strong> ${getOrderLabel(order)}</div>
     <div><strong>Date: </strong> ${formatOrderDateTime(order.created_at)}</div>
     <div><strong>Type: </strong> ${order.order_type === 'dine_in' ? 'Dine In' : 'Takeout'}</div>
-    <div><strong>${order.order_type === 'dine_in' ? 'Table' : 'Customer'}: </strong> ${order.order_type === 'dine_in' ? order.table_number ?? '—' : order.customer_name ?? '—'}</div>
+    ${order.order_type === 'dine_in' ? `
+      <div><strong>Customer: </strong> ${order.customer_name ?? '—'}</div>
+      <div><strong>Table: </strong> ${order.table_number ?? '—'}</div>
+    ` : `
+      <div><strong>Customer: </strong> ${order.customer_name ?? '—'}</div>
+    `}
     <div><strong>Pay: </strong> ${order.payment_mode === 'gcash' ? 'Gcash' : order.payment_mode === 'cash' ? 'Cash' : '—'}</div>
   </div>
   <table>
@@ -276,6 +306,7 @@ function FrontDesk() {
     const [note, setNote] = React.useState('');
     const [orderType, setOrderType] = React.useState(null);
     const [orderDetail, setOrderDetail] = React.useState('');
+    const [customerName, setCustomerName] = React.useState('');
     const [paymentMode, setPaymentMode] = React.useState(null);
     const [isSubmitting, setIsSubmitting] = React.useState(false);
     const [lastOrderId, setLastOrderId] = React.useState(null);
@@ -283,10 +314,12 @@ function FrontDesk() {
     const [showConfirmModal, setShowConfirmModal] = React.useState(false);
     const [pendingOrderCount, setPendingOrderCount] = React.useState(0);
     const [error, setError] = React.useState(null);
+    const [isLoading, setIsLoading] = React.useState(true);
     const [toastMessage, setToastMessage] = React.useState(null);
     const [isLeaving, setIsLeaving] = React.useState(false);
     const [preOrders, setPreOrders] = React.useState([]);
     const [igStoryDiscount, setIgStoryDiscount] = React.useState(false);
+    const [orders, setOrders] = React.useState([]);
     const [mainDrinkDiscountActive, setMainDrinkDiscountActive] = React.useState(false);
 
     // Discount calculation helpers
@@ -366,6 +399,7 @@ function FrontDesk() {
                 const r = await window.axios.get('/api/products');
                 if (!isMounted) return;
                 setProducts(r.data);
+                setIsLoading(false);
             } catch (e) {
                 if (!isMounted) return;
                 setError(e?.message ?? 'Failed to load products');
@@ -470,10 +504,11 @@ function FrontDesk() {
         async function refreshPendingOrders() {
             try {
                 const r = await window.axios.get('/api/orders', {
-                    params: { active: true },
+                    params: { active: true, include_preorders: true, minimal: true },
                 });
 
                 if (!cancelled) {
+                    setOrders(r.data);
                     setPendingOrderCount(r.data.length);
                 }
             } catch {
@@ -495,8 +530,9 @@ function FrontDesk() {
             id: null,
             note: note.trim() ? note.trim() : null,
             order_type: orderType,
-            table_number: orderType === 'dine_in' ? orderDetail.trim() || null : null,
-            customer_name: orderType === 'takeout' ? orderDetail.trim() || null : null,
+            table_selection: orderType === 'dine_in' ? orderDetail : null,
+            table_number: orderType === 'dine_in' ? (orderDetail.split('| Table ')[1] || null) : null,
+            customer_name: customerName.trim() || null,
             payment_mode: paymentMode,
             items: cartItems.map((x) => ({
                 product: x.product,
@@ -527,6 +563,7 @@ function FrontDesk() {
                 order_type: orderPreview.order_type,
                 payment_mode: orderPreview.payment_mode,
                 table_number: orderPreview.table_number,
+                table_selection: orderPreview.table_selection,
                 customer_name: orderPreview.customer_name,
                 payment_mode: orderPreview.payment_mode,
                 items: orderPreview.items.map((x) => ({
@@ -548,6 +585,7 @@ function FrontDesk() {
             setNote('');
             setOrderType(null);
             setOrderDetail('');
+            setCustomerName('');
             setPaymentMode(null);
             setPendingOrderCount((prev) => prev + 1);
             setToastMessage(`Order #${r.data.id} Successfully Sent to Kitchen`);
@@ -575,6 +613,7 @@ function FrontDesk() {
                 payment_mode: orderPreview.payment_mode,
                 order_type: orderPreview.order_type,
                 table_number: orderPreview.table_number,
+                table_selection: orderPreview.table_selection,
                 customer_name: orderPreview.customer_name,
                 payment_mode: orderPreview.payment_mode,
                 status: 'preorder',
@@ -595,6 +634,7 @@ function FrontDesk() {
             setNote('');
             setOrderType(null);
             setOrderDetail('');
+            setCustomerName('');
             setPaymentMode(null);
             setToastMessage('Pre-order saved successfully');
         } catch (e) {
@@ -621,6 +661,22 @@ function FrontDesk() {
         }
 
         await submitOrder();
+    }
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                <div className="relative">
+                    <div className="h-24 w-24 mb-8 animate-bounce">
+                        <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    </div>
+                </div>
+                <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                    Preparing POS...
+                </div>
+                <p className="mt-2 text-xs font-bold text-emerald-600 uppercase tracking-[0.3em]">Loading Menu & Orders</p>
+            </div>
+        );
     }
 
     return (
@@ -650,8 +706,9 @@ function FrontDesk() {
                         <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-900 ring-1 ring-inset ring-amber-500/20">
                             {pendingOrderCount} Pending Orders
                         </span>
-                        <ButtonLink to="/front/status" className="bg-white border shadow-sm">Status</ButtonLink>
-                        <ButtonLink to="/front/preorders" className="bg-white border shadow-sm">Pre-Orders</ButtonLink>
+                        <ButtonLink to="/front/status" className="bg-white border shadow-sm font-bold text-blue-600">Order Status</ButtonLink>
+                        <ButtonLink to="/front/tables" className="bg-white border shadow-sm font-bold text-emerald-600">Table Status</ButtonLink>
+                        <ButtonLink to="/front/preorders" className="bg-white border shadow-sm font-bold text-amber-600">Pre-Orders</ButtonLink>
                         <ButtonLink to="/front/history" className="bg-white border shadow-sm">Order History</ButtonLink>
                     </div>
                 </div>
@@ -740,7 +797,7 @@ function FrontDesk() {
                 </div>
 
                 {/* Sidebar - Rigid */}
-                <aside className="w-[320px] lg:w-[380px] flex flex-col h-full rounded-2xl border border-slate-200 bg-white p-4 lg:p-6 shadow-xl shadow-slate-200/50 overflow-hidden">
+                <aside className="w-[330px] lg:w-[380px] flex flex-col h-full rounded-2xl border border-slate-200 bg-white p-4 lg:p-6 shadow-xl shadow-slate-200/50 overflow-hidden">
                     <h2 className="text-lg lg:text-xl font-bold mb-4 lg:mb-6 flex-none text-slate-800 tracking-tight">Order Form</h2>
 
                     {/* Scrollable Middle Section */}
@@ -752,9 +809,71 @@ function FrontDesk() {
                             <button type="button" onClick={() => { setOrderType('dine_in'); setOrderDetail(''); }} className={`flex-1 rounded-lg py-2 lg:py-2.5 text-xs lg:text-sm font-bold transition-all ${orderType === 'dine_in' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}>Dine In</button>
                         </div>
 
-                        <div className="flex-none">
-                            <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">{orderType === 'dine_in' ? 'Table Number' : 'Customer Name'}</label>
-                            <input type="text" value={orderDetail} onChange={(e) => setOrderDetail(e.target.value)} className="w-full rounded-xl border-slate-200 bg-slate-50 p-2 lg:p-3 text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none" placeholder={orderType === 'dine_in' ? 'e.g. 05' : 'e.g. John Doe'} disabled={!orderType}/>
+                        <div className="flex-none space-y-4">
+                            {orderType === 'dine_in' ? (
+                                <>
+                                    <div>
+                                        <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">Table selection</label>
+                                        <select 
+                                            value={orderDetail} 
+                                            onChange={(e) => setOrderDetail(e.target.value)} 
+                                            className="w-full rounded-xl border-slate-200 bg-slate-50 p-2 lg:p-3 text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                                        >
+                                            <option value="" className='text-slate-400'>Select a table...</option>
+                                            {TIME_SLOTS.flatMap(slot => 
+                                                slot.tables.map(table => {
+                                                    const selectionKey = `${slot.shortLabel} | Table ${table.id}`;
+                                                    const activeOrder = orders.find(o => o.table_selection === selectionKey && (o.status === 'new' || o.status === 'in_progress' || o.status === 'done'));
+                                                    const preOrder = orders.find(o => o.table_selection === selectionKey && o.status === 'preorder');
+                                                    
+                                                    const isOccupied = !!activeOrder;
+                                                    const isReserved = !!preOrder;
+                                                    const isUnavailable = isOccupied || isReserved;
+                                                    
+                                                    const status = isOccupied ? 'Occupied' : (isReserved ? 'Reserved' : 'Available');
+                                                    const customer = isOccupied ? activeOrder.customer_name : (isReserved ? preOrder.customer_name : null);
+                                                    
+                                                    return (
+                                                        <option 
+                                                            key={`${slot.id}-${table.id}`} 
+                                                            value={selectionKey}
+                                                            disabled={isUnavailable}
+                                                            style={{
+                                                                backgroundColor: isOccupied ? '#fee2e2' : (isReserved ? '#fef3c7' : '#dcfce7'),
+                                                                color: isOccupied ? '#991b1b' : (isReserved ? '#92400e' : '#166534')
+                                                            }}
+                                                        >
+                                                            {selectionKey} ({status}){customer ? ` — ${customer}` : ''}
+                                                        </option>
+                                                    );
+                                                })
+                                            )}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">Customer Name</label>
+                                        <input 
+                                            type="text" 
+                                            value={customerName} 
+                                            onChange={(e) => setCustomerName(e.target.value)} 
+                                            className="w-full rounded-xl border-slate-200 bg-slate-50 p-2 lg:p-3 text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none" 
+                                            placeholder="e.g. John Doe"
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <div>
+                                    <label className="text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1 lg:mb-2 block">Customer Name</label>
+                                    <input 
+                                        type="text" 
+                                        value={customerName} 
+                                        onChange={(e) => setCustomerName(e.target.value)} 
+                                        className="w-full rounded-xl border-slate-200 bg-slate-50 p-2 lg:p-3 text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none" 
+                                        placeholder="e.g. John Doe" 
+                                        disabled={!orderType}
+                                    />
+                                </div>
+                            )}
                         </div>
 
                         {/* Cart Items */}
@@ -877,10 +996,20 @@ function FrontDesk() {
                             </div>
                         </div>
                         <div className="space-y-2 lg:space-y-3">
-                            <button type="button" disabled={cartItems.length === 0 || isSubmitting || !orderType || !orderDetail.trim() || !paymentMode} onClick={() => openConfirm('send')} className="w-full rounded-2xl bg-emerald-600 py-3 lg:py-4 text-base lg:text-lg font-bold text-white shadow-lg shadow-emerald-200 disabled:opacity-40 active:scale-[0.98] transition-all">
+                            <button 
+                                type="button" 
+                                disabled={cartItems.length === 0 || isSubmitting || !orderType || (orderType === 'dine_in' ? (!orderDetail.trim() || !customerName.trim()) : !customerName.trim()) || !paymentMode} 
+                                onClick={() => openConfirm('send')} 
+                                className="w-full rounded-2xl bg-emerald-600 py-3 lg:py-4 text-base lg:text-lg font-bold text-white shadow-lg shadow-emerald-200 disabled:opacity-40 active:scale-[0.98] transition-all"
+                            >
                                 {isSubmitting ? 'Sending...' : 'Send to Kitchen'}
                             </button>
-                            <button type="button" disabled={cartItems.length === 0 || isSubmitting || !orderType || !orderDetail.trim() || !paymentMode} onClick={() => openConfirm('preorder')} className="w-full rounded-xl border border-slate-200 bg-white py-2 lg:py-3 text-xs lg:text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40 transition-all">
+                            <button 
+                                type="button" 
+                                disabled={cartItems.length === 0 || isSubmitting || !orderType || (orderType === 'dine_in' ? (!orderDetail.trim() || !customerName.trim()) : !customerName.trim()) || !paymentMode} 
+                                onClick={() => openConfirm('preorder')} 
+                                className="w-full rounded-xl border border-slate-200 bg-white py-2 lg:py-3 text-xs lg:text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-40 transition-all"
+                            >
                                 Pre-Order
                             </button>
                         </div>
@@ -920,8 +1049,14 @@ function FrontDesk() {
                                 </div>
                                 <div>
                                     <div className="font-semibold text-slate-900">{orderType === 'dine_in' ? 'Table' : 'Customer'}</div>
-                                    <div>{orderDetail || '—'}</div>
+                                    <div>{orderDetail || customerName || '—'}</div>
                                 </div>
+                                {orderType === 'dine_in' && (
+                                    <div>
+                                        <div className="font-semibold text-slate-900">Customer</div>
+                                        <div>{customerName || '—'}</div>
+                                    </div>
+                                )}
                                 <div>
                                     <div className="font-semibold text-slate-900">Payment</div>
                                     <div>{paymentMode === 'gcash' ? 'Gcash' : paymentMode === 'cash' ? 'Cash' : '—'}</div>
@@ -1028,11 +1163,9 @@ function FrontDesk() {
                                 </svg>
                             </button>
                         </div>
-
                     </div>
                 </div>
             )}
-
         </div>
     );
 }
@@ -1151,6 +1284,22 @@ function FrontStatus() {
         }
     }, []);
 
+    if (isLoading) {
+        return (
+            <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                <div className="relative">
+                    <div className="h-24 w-24 mb-8 animate-bounce">
+                        <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    </div>
+                </div>
+                <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                    Syncing Orders...
+                </div>
+                <p className="mt-2 text-xs font-bold text-blue-600 uppercase tracking-[0.3em]">Please Wait</p>
+            </div>
+        );
+    }
+
     return (
     <>
         <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col">
@@ -1237,8 +1386,17 @@ function FrontStatus() {
                                             </div>
                                             
                                             {(o.table_number || o.customer_name) && (
-                                                <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
-                                                    {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
+                                                <div className="flex flex-col overflow-hidden">
+                                                    {o.customer_name && (
+                                                        <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
+                                                            {o.customer_name}
+                                                        </div>
+                                                    )}
+                                                    {o.order_type === 'dine_in' && o.table_selection && (
+                                                        <div className="text-[10px] font-medium text-slate-400 leading-tight">
+                                                            {o.table_selection.replace(' | ', ' | ')}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -1493,10 +1651,477 @@ function FrontStatus() {
     );
 }
 
+function TableStatusManagement() {
+    const [orders, setOrders] = React.useState([]);
+    const [isLoading, setIsLoading] = React.useState(true);
+    const [isClearing, setIsClearing] = React.useState(null);
+    const [clearingOrderInfo, setClearingOrderInfo] = React.useState(null);
+    const [selectedOrderDetails, setSelectedOrderDetails] = React.useState(null);
+    const [isSavingNote, setIsSavingNote] = React.useState(false);
+    const [isSendingToKitchen, setIsSendingToKitchen] = React.useState(false);
+    const [editingNote, setEditingNote] = React.useState('');
+
+    React.useEffect(() => {
+        let isMounted = true;
+        async function loadOrders() {
+        try {
+            const r = await window.axios.get('/api/orders', { params: { active: true, include_preorders: true } });
+            if (isMounted) {
+                setOrders(r.data);
+                setIsLoading(false);
+            }
+        } catch (e) {
+            console.error('Failed to load orders', e);
+        }
+    }
+        loadOrders();
+        const interval = setInterval(loadOrders, 3000);
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, []);
+
+    async function clearTable(orderId) {
+        if (!orderId) return;
+        setIsClearing(orderId);
+        try {
+            await window.axios.patch(`/api/orders/${orderId}/status`, {
+                status: 'completed',
+            });
+            // Immediately update local state for better UX
+            setOrders(prev => prev.filter(o => o.id !== orderId));
+            setClearingOrderInfo(null);
+        } catch (e) {
+            console.error('Failed to clear table', e);
+            alert('Failed to clear table. Please try again.');
+        } finally {
+            setIsClearing(null);
+        }
+    }
+
+    async function saveNote(orderId) {
+        if (!orderId) return;
+        setIsSavingNote(true);
+        try {
+            const r = await window.axios.patch(`/api/orders/${orderId}/status`, {
+                note: editingNote,
+            });
+            // Update local orders list
+            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, note: editingNote } : o));
+            // Update selected order details if open
+            if (selectedOrderDetails?.id === orderId) {
+                setSelectedOrderDetails(prev => ({ ...prev, note: editingNote }));
+            }
+        } catch (e) {
+            console.error('Failed to save note', e);
+            alert('Failed to save note. Please try again.');
+        } finally {
+            setIsSavingNote(false);
+        }
+    }
+
+    async function sendToKitchen(orderId) {
+        if (!orderId) return;
+        setIsSendingToKitchen(true);
+        try {
+            const r = await window.axios.patch(`/api/orders/${orderId}/status`, {
+                status: 'new',
+                note: editingNote?.trim() ? editingNote.trim() : null,
+            });
+            
+            // Store for printing
+            window.localStorage.setItem('lastOrderSlip', JSON.stringify(r.data));
+
+            // Update local state
+            setOrders(prev => prev.map(o => o.id === orderId ? r.data : o));
+            
+            // Update modal data
+            setSelectedOrderDetails(r.data);
+            
+            // Trigger a print
+            window.dispatchEvent(new CustomEvent('print-order-slip', { detail: r.data }));
+            
+        } catch (e) {
+            console.error('Failed to send pre-order to kitchen', e);
+            alert('Failed to send order to kitchen. Please try again.');
+        } finally {
+            setIsSendingToKitchen(false);
+        }
+    }
+
+    const timeSlots = React.useMemo(() => {
+        return TIME_SLOTS.map(slot => ({
+            ...slot,
+            tables: slot.tables.map(table => {
+                const selectionKey = `${slot.shortLabel} | Table ${table.id}`;
+                const activeOrder = orders.find(o => o.table_selection === selectionKey && (o.status === 'new' || o.status === 'in_progress' || o.status === 'done'));
+                const preOrder = orders.find(o => o.table_selection === selectionKey && o.status === 'preorder');
+                
+                let status = 'Available';
+                let customer = null;
+                let orderId = null;
+                let orderKitchenStatus = null;
+                let fullOrder = null;
+
+                if (activeOrder) {
+                    status = 'Occupied';
+                    customer = activeOrder.customer_name;
+                    orderId = activeOrder.id;
+                    orderKitchenStatus = activeOrder.status; // 'new', 'in_progress', or 'done'
+                    fullOrder = activeOrder;
+                } else if (preOrder) {
+                    status = 'Reserved';
+                    customer = preOrder.customer_name;
+                    orderId = preOrder.id;
+                    orderKitchenStatus = 'preorder';
+                    fullOrder = preOrder;
+                }
+                
+                return {
+                    ...table,
+                    status,
+                    customer,
+                    orderId,
+                    orderKitchenStatus,
+                    fullOrder
+                };
+            })
+        }));
+    }, [orders]);
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                <div className="relative">
+                    {/* Pulsing logo or icon */}
+                    <div className="h-24 w-24 mb-8 animate-bounce">
+                        <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    </div>
+                </div>
+                <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                    Syncing Table Status...
+                </div>
+                <p className="mt-2 text-xs font-bold text-emerald-600 uppercase tracking-[0.3em]">Please Wait</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex flex-col h-screen bg-[#fff7eb] text-slate-900 font-sans">
+            {/* Unified Header */}
+            <header className="flex-none border-b border-slate-200 bg-white/80 backdrop-blur-md px-6 py-3">
+                <div className="max-w-[1600px] mx-auto flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        <ButtonLink to="/front" className="text-slate-500 hover:text-slate-900">
+                            <span className="text-lg">←</span>
+                        </ButtonLink>
+                        <div className="flex items-center gap-4">
+                            <img src="/images/logo.png" alt="Logo" className="h-12 w-auto object-contain" />
+                            <div>
+                                <h1 className="text-2xl font-black tracking-tighter text-slate-800 leading-none">Table Management</h1>
+                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">Real-time Occupancy</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main className="flex-1 overflow-y-auto p-8 max-w-[1400px] w-full mx-auto space-y-12">
+                
+                {timeSlots.map((slot) => (
+                    <section key={slot.id} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {/* Section Header (Timeslot) */}
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="bg-slate-900 text-white px-4 py-1.5 rounded-full shadow-lg shadow-slate-200">
+                                <h2 className="text-xs font-black uppercase tracking-[0.2em]">
+                                    {slot.label}
+                                </h2>
+                            </div>
+                            <div className="h-[1px] flex-1 bg-slate-200"></div>
+                        </div>
+
+                    {/* Tables Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {slot.tables.map((table) => {
+                        const isOccupied = table.status === 'Occupied';
+                        const isReserved = table.status === 'Reserved';
+                        
+                    return (
+                        <button
+                            key={table.id}
+                            onClick={() => {
+                                if (table.fullOrder) {
+                                    setSelectedOrderDetails(table.fullOrder);
+                                    setEditingNote(table.fullOrder.note || '');
+                                }
+                            }}
+                            className={`group relative flex flex-col p-6 rounded-[2.5rem] bg-white border-b-4 transition-all duration-300 active:scale-95 shadow-xl ${
+                                isOccupied 
+                                ? 'border-rose-500 shadow-rose-200/20' 
+                                : isReserved
+                                ? 'border-amber-500 shadow-amber-200/20'
+                                : 'border-emerald-500 shadow-emerald-200/20 hover:translate-y-[-4px] hover:shadow-2xl hover:shadow-emerald-300/30'
+                            }`}
+                        >
+                            {/* Status Pill - Top Right */}
+                            <div className="flex justify-between items-start mb-6">
+                                <div className="flex flex-col text-left">
+                                    <span className={`text-[10px] font-black uppercase tracking-widest transition-colors ${
+                                        isOccupied ? 'text-rose-300' : isReserved ? 'text-amber-300' : 'text-emerald-300'
+                                    }`}>
+                                        Table
+                                    </span>
+                                    <span className="text-4xl font-black text-slate-800 leading-none">{table.id}</span>
+                                </div>
+                                <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm ${
+                                    isOccupied ? 'bg-rose-50 text-rose-600 border border-rose-100' : 
+                                    isReserved ? 'bg-amber-50 text-amber-600 border border-amber-100' :
+                                    'bg-emerald-500 text-white shadow-emerald-100'
+                                }`}>
+                                    {table.status}
+                                </div>
+                            </div>
+
+                            {/* Capacity Visualization */}
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex -space-x-1">
+                                        {[...Array(table.cap)].map((_, i) => (
+                                            <div 
+                                                key={i} 
+                                                className={`w-2 h-2 rounded-full border border-white shadow-sm ${
+                                                    isOccupied ? 'bg-rose-400' : isReserved ? 'bg-amber-400' : 'bg-emerald-400'
+                                                }`}
+                                            ></div>
+                                        ))}
+                                    </div>
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                                        For {table.cap} pax
+                                    </span>
+                                </div>
+
+                                {isOccupied && (
+                                    <div className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border ${
+                                        table.orderKitchenStatus === 'done'
+                                        ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                                        : 'bg-blue-50 text-blue-600 border-blue-100 animate-pulse'
+                                    }`}>
+                                        {table.orderKitchenStatus === 'done' ? 'Order Served' : 'Order in Kitchen'}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Occupancy Detail Footer */}
+                            <div className={`mt-auto pt-4 border-t border-dashed w-full ${
+                                isOccupied ? 'border-rose-100' : isReserved ? 'border-amber-100' : 'border-emerald-100'
+                            }`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2 overflow-hidden">
+                                        {/* Interactive Dot */}
+                                        <div className={`w-1.5 h-1.5 rounded-full ${
+                                            isOccupied ? 'bg-rose-500' : isReserved ? 'bg-amber-500' : 'bg-emerald-500 animate-pulse'
+                                        }`}></div>
+                                        <p className={`text-[11px] font-bold text-left truncate tracking-tight ${
+                                            isOccupied ? 'text-slate-600' : isReserved ? 'text-slate-600' : 'text-emerald-600'
+                                        }`}>
+                                            {isOccupied ? `Customer: ${table.customer}` : isReserved ? `Reserved: ${table.customer}` : 'Tap to occupy table'}
+                                        </p>
+                                    </div>
+
+                                    {isOccupied && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setClearingOrderInfo({ id: table.orderId, tableNum: table.id, customer: table.customer });
+                                            }}
+                                            disabled={isClearing === table.orderId}
+                                            className="flex-none bg-rose-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded-lg shadow-sm hover:bg-rose-600 active:scale-95 transition-all disabled:opacity-50"
+                                        >
+                                            {isClearing === table.orderId ? '...' : 'Clear Table'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                                        {/* Hover Magic: Subtle Background Tint */}
+                                        {(!isOccupied && !isReserved) && (
+                                            <div className="absolute inset-0 rounded-[2.5rem] bg-emerald-500/0 group-hover:bg-emerald-500/[0.02] transition-colors pointer-events-none"></div>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </section>
+                ))}
+
+            </main>
+
+            {/* Clear Table Confirmation Modal */}
+            {clearingOrderInfo && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="h-12 w-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800 tracking-tight">Clear Table {clearingOrderInfo.tableNum}?</h3>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Confirm Table Availability</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-2xl p-4 mb-8 border border-slate-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Customer</span>
+                                <span className="text-sm font-bold text-slate-700">{clearingOrderInfo.customer || '—'}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 leading-relaxed font-medium">
+                                Marking this table as available will complete the active order and clear the display.
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setClearingOrderInfo(null)}
+                                className="flex-1 px-6 py-3 rounded-2xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 active:scale-95 transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => clearTable(clearingOrderInfo.id)}
+                                disabled={isClearing === clearingOrderInfo.id}
+                                className="flex-1 px-6 py-3 rounded-2xl bg-rose-500 text-white text-sm font-bold hover:bg-rose-600 active:scale-95 transition-all shadow-lg shadow-rose-200 disabled:opacity-50"
+                            >
+                                {isClearing === clearingOrderInfo.id ? '...' : 'Clear Table'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Order Details & Note Modal */}
+            {selectedOrderDetails && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-4">
+                                <div className={`h-12 w-12 rounded-2xl flex items-center justify-center ${
+                                    selectedOrderDetails.status === 'preorder' ? 'bg-amber-50 text-amber-500' : 'bg-rose-50 text-rose-500'
+                                }`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                                        {selectedOrderDetails.status === 'preorder' ? 'Pre-Order Details' : 'Order Details'}
+                                    </h3>
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                        {selectedOrderDetails.table_selection || `Order #${selectedOrderDetails.id}`}
+                                    </p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={() => setSelectedOrderDetails(null)}
+                                className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-colors"
+                            >
+                                <span className="text-xl font-bold">×</span>
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+                            {/* Items Section */}
+                            <div className="space-y-3">
+                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Order Items</div>
+                                <div className="space-y-2">
+                                    {selectedOrderDetails.items?.map((item) => (
+                                        <div key={item.id} className="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                                            <div className="flex flex-col">
+                                                <span className="text-sm font-bold text-slate-700">{item.product?.name}</span>
+                                                <span className="text-[10px] font-bold text-slate-400 uppercase">{item.product?.category}</span>
+                                            </div>
+                                            <div className="h-8 w-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center text-xs font-black text-slate-700">
+                                                x{item.quantity}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Note Section */}
+                            <div className="space-y-3">
+                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Special Instructions / Note</div>
+                                <div className="relative">
+                                    <textarea 
+                                        value={editingNote}
+                                        onChange={(e) => setEditingNote(e.target.value)}
+                                        placeholder="Add a note for this table..."
+                                        className="w-full h-32 rounded-2xl bg-slate-50 border border-slate-100 p-4 text-sm font-medium text-slate-700 focus:ring-2 focus:ring-emerald-500/20 outline-none transition-all resize-none"
+                                    />
+                                    <button 
+                                        onClick={() => saveNote(selectedOrderDetails.id)}
+                                        disabled={isSavingNote || editingNote === (selectedOrderDetails.note || '')}
+                                        className="absolute bottom-3 right-3 px-4 py-2 rounded-xl bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-100 hover:bg-emerald-600 active:scale-95 transition-all disabled:opacity-0 disabled:scale-90"
+                                    >
+                                        {isSavingNote ? '...' : 'Save Note'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-8 flex gap-3">
+                            {selectedOrderDetails.status === 'preorder' && (
+                                <button
+                                    type="button"
+                                    onClick={() => sendToKitchen(selectedOrderDetails.id)}
+                                    disabled={isSendingToKitchen}
+                                    className="flex-1 px-6 py-4 rounded-2xl bg-slate-900 text-white text-sm font-black uppercase tracking-widest hover:bg-slate-800 active:scale-95 transition-all shadow-xl shadow-slate-200 disabled:opacity-50"
+                                >
+                                    {isSendingToKitchen ? 'Sending...' : 'Send to Kitchen'}
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const orderId = selectedOrderDetails.id;
+                                    const tableNum = selectedOrderDetails.table_selection?.split('| Table ')[1] || selectedOrderDetails.id;
+                                    const customer = selectedOrderDetails.customer_name;
+                                    setSelectedOrderDetails(null);
+                                    setClearingOrderInfo({ id: orderId, tableNum, customer });
+                                }}
+                                className="flex-1 px-6 py-4 rounded-2xl bg-rose-50 text-rose-600 text-sm font-black uppercase tracking-widest hover:bg-rose-100 active:scale-95 transition-all"
+                            >
+                                Clear Table
+                            </button>
+                            {selectedOrderDetails.status !== 'preorder' && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedOrderDetails(null)}
+                                    className="flex-1 px-6 py-4 rounded-2xl bg-slate-900 text-white text-sm font-black uppercase tracking-widest hover:bg-slate-800 active:scale-95 transition-all shadow-xl shadow-slate-200"
+                                >
+                                    Done
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
 function OrderHistory({ mode }) {
     const navigate = useNavigate();
     const location = useLocation();
     const [orders, setOrders] = React.useState([]);
+    const [isLoading, setIsLoading] = React.useState(true);
     const [error, setError] = React.useState(null);
     const [statusFilter, setStatusFilter] = React.useState('completed');
     const [currentPage, setCurrentPage] = React.useState(1);
@@ -1552,12 +2177,14 @@ function OrderHistory({ mode }) {
     };
 
     React.useEffect(() => {
-    const params = { history: true };
+        const params = { history: true };
+        setIsLoading(true);
 
-    window.axios
-        .get('/api/orders', { params })
-        .then((r) => setOrders(r.data))
-        .catch((e) => setError('Failed to load history'));
+        window.axios
+            .get('/api/orders', { params })
+            .then((r) => setOrders(r.data))
+            .catch((e) => setError('Failed to load history'))
+            .finally(() => setIsLoading(false));
     }, [mode]);
 
     React.useEffect(() => {
@@ -1594,10 +2221,26 @@ function OrderHistory({ mode }) {
     }, [currentPage, totalPages]);
 
     const filterOptions = [
-    { id: 'completed', label: 'Completed' },
-    { id: 'cancelled', label: 'Cancelled' },
-    { id: 'archived', label: 'Archived' },
+        { id: 'completed', label: 'Completed' },
+        { id: 'cancelled', label: 'Cancelled' },
+        { id: 'archived', label: 'Archived' },
     ];
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                <div className="relative">
+                    <div className="h-24 w-24 mb-8 animate-bounce">
+                        <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    </div>
+                </div>
+                <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                    Loading History...
+                </div>
+                <p className="mt-2 text-xs font-bold text-slate-400 uppercase tracking-[0.3em]">Please Wait</p>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-[#fff7eb] text-slate-900 flex flex-col">
@@ -1759,9 +2402,18 @@ function OrderHistory({ mode }) {
                                                     </div>
                                                     
                                                     {(o.table_number || o.customer_name) && (
-                                                        <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
-                                                            {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
-                                                            <span className="ml-1 text-[10px] text-slate-300">✎</span>
+                                                        <div className="flex flex-col overflow-hidden">
+                                                            {o.customer_name && (
+                                                                <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
+                                                                    {o.customer_name}
+                                                                </div>
+                                                            )}
+                                                            {o.order_type === 'dine_in' && o.table_selection && (
+                                                                <div className="text-[10px] font-medium text-slate-400 leading-tight">
+                                                                    {o.table_selection}
+                                                                </div>
+                                                            )}
+                                                            <span className="text-[10px] text-slate-300">✎</span>
                                                         </div>
                                                     )}
                                                 </div>
@@ -2243,6 +2895,22 @@ function KitchenAnalytics() {
         link.click();
         document.body.removeChild(link);
     };
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                <div className="relative">
+                    <div className="h-24 w-24 mb-8 animate-bounce">
+                        <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                    </div>
+                </div>
+                <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                    Analyzing Data...
+                </div>
+                <p className="mt-2 text-xs font-bold text-emerald-600 uppercase tracking-[0.3em]">Please Wait</p>
+            </div>
+        );
+    }
 
     return (
         <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col font-sans">
@@ -2942,6 +3610,22 @@ function Kitchen() {
 
         const cancelingOrder = orders.find((o) => o.id === cancelingOrderId) ?? null;
 
+        if (isLoading) {
+            return (
+                <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                    <div className="relative">
+                        <div className="h-24 w-24 mb-8 animate-bounce">
+                            <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                        </div>
+                    </div>
+                    <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                        Kitchen Syncing...
+                    </div>
+                    <p className="mt-2 text-xs font-bold text-emerald-600 uppercase tracking-[0.3em]">Incoming Orders</p>
+                </div>
+            );
+        }
+
         return (
         <>
             <div className="flex flex-col h-screen overflow-hidden bg-[#fff7eb] text-slate-900">
@@ -3021,8 +3705,17 @@ function Kitchen() {
                                                 </div>
                                                 
                                                 {(o.table_number || o.customer_name) && (
-                                                    <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
-                                                        {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
+                                                    <div className="flex flex-col overflow-hidden">
+                                                        {o.customer_name && (
+                                                            <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
+                                                                {o.customer_name}
+                                                            </div>
+                                                        )}
+                                                        {o.order_type === 'dine_in' && o.table_selection && (
+                                                            <div className="text-[10px] font-medium text-slate-400 leading-tight">
+                                                                {o.table_selection}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -3239,6 +3932,7 @@ function Kitchen() {
 
     function PreOrders() {
         const [preOrders, setPreOrdersState] = React.useState([]);
+        const [isLoading, setIsLoading] = React.useState(true);
         const [isSending, setIsSending] = React.useState(false);
         const [sendingId, setSendingId] = React.useState(null);
         const [toastMessage, setToastMessage] = React.useState(null);
@@ -3275,6 +3969,7 @@ function Kitchen() {
         }, [toastMessage]);
 
         async function fetchPreOrders() {
+            setIsLoading(true);
             try {
                 const r = await window.axios.get('/api/orders', {
                     params: { status: 'preorder' },
@@ -3282,6 +3977,8 @@ function Kitchen() {
                 setPreOrdersState(r.data);
             } catch (e) {
                 setError(e?.message ?? 'Failed to load pre-orders');
+            } finally {
+                setIsLoading(false);
             }
         }
 
@@ -3394,8 +4091,24 @@ function Kitchen() {
             (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
         );
 
-        return (
-            <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col">
+        if (isLoading) {
+            return (
+                <div className="flex flex-col h-screen items-center justify-center bg-[#fff7eb]">
+                    <div className="relative">
+                        <div className="h-24 w-24 mb-8 animate-bounce">
+                            <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
+                        </div>
+                    </div>
+                    <div className="text-xl font-black text-slate-800 tracking-tighter uppercase animate-pulse">
+                        Loading Pre-Orders...
+                    </div>
+                    <p className="mt-2 text-xs font-bold text-amber-600 uppercase tracking-[0.3em]">Please Wait</p>
+                </div>
+            );
+        }
+
+    return (
+        <div className="h-screen overflow-y-auto bg-[#fff7eb] text-slate-900 flex flex-col">
                 <header className="flex-none sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur-md px-6 py-4">
                     <div className="max-w-[1600px] mx-auto flex items-center justify-between">
                         <div className="flex items-center gap-4">
@@ -3458,8 +4171,17 @@ function Kitchen() {
                                                 </div>
                                                 
                                                 {(o.table_number || o.customer_name) && (
-                                                    <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
-                                                        {o.order_type === 'dine_in' ? `Table ${o.table_number}` : o.customer_name}
+                                                    <div className="flex flex-col overflow-hidden">
+                                                        {o.customer_name && (
+                                                            <div className="text-sm font-bold text-slate-700 tracking-tight truncate">
+                                                                {o.customer_name}
+                                                            </div>
+                                                        )}
+                                                        {o.order_type === 'dine_in' && o.table_selection && (
+                                                            <div className="text-[10px] font-medium text-slate-400 leading-tight">
+                                                                {o.table_selection}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -3689,6 +4411,7 @@ function App() {
                 <Route path="/" element={<ModeSelect />} />
                 <Route path="/front" element={<FrontDesk />} />
                 <Route path="/front/status" element={<FrontStatus />} />
+                <Route path="/front/tables" element={<TableStatusManagement />} />
                 <Route path="/front/preorders" element={<PreOrders />} />
                 <Route
                     path="/front/history"

@@ -12,6 +12,7 @@ class Order extends Model
         'note',
         'order_type',
         'table_number',
+        'table_selection',
         'customer_name',
         'payment_mode',
         'preorder_number',
