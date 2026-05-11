@@ -174,6 +174,9 @@ class OrderController extends Controller
                 if (array_key_exists('table_selection', $data)) {
                     $update['table_selection'] = $data['table_selection'];
                 }
+                if (array_key_exists('customer_name', $data)) {
+                    $update['customer_name'] = $data['customer_name'];
+                }
             } else {
                 // If changing to takeout, clear table info
                 $update['table_number'] = null;
