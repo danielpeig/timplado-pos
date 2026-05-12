@@ -565,7 +565,6 @@ function FrontDesk() {
                 table_number: orderPreview.table_number,
                 table_selection: orderPreview.table_selection,
                 customer_name: orderPreview.customer_name,
-                payment_mode: orderPreview.payment_mode,
                 items: orderPreview.items.map((x) => ({
                     product_id: x.productId,
                     quantity: x.quantity,
@@ -615,7 +614,6 @@ function FrontDesk() {
                 table_number: orderPreview.table_number,
                 table_selection: orderPreview.table_selection,
                 customer_name: orderPreview.customer_name,
-                payment_mode: orderPreview.payment_mode,
                 status: 'preorder',
                 items: orderPreview.items.map((x) => ({
                     product_id: x.productId,
@@ -823,24 +821,22 @@ function FrontDesk() {
                                             {TIME_SLOTS.flatMap(slot => 
                                                 slot.tables.map(table => {
                                                     const selectionKey = `${slot.shortLabel} | Table ${table.id}`;
-                                                    const activeOrder = orders.find(o => o.table_selection === selectionKey && (o.status === 'new' || o.status === 'in_progress' || o.status === 'done'));
-                                                    const preOrder = orders.find(o => o.table_selection === selectionKey && o.status === 'preorder');
-                                                    
-                                                    const isOccupied = !!activeOrder;
-                                                    const isReserved = !!preOrder;
-                                                    const isUnavailable = isOccupied || isReserved;
-                                                    
-                                                    const status = isOccupied ? 'Occupied' : (isReserved ? 'Reserved' : 'Available');
-                                                    const customer = isOccupied ? activeOrder.customer_name : (isReserved ? preOrder.customer_name : null);
-                                                    
+                                                    const activeOrders = orders.filter(o => o.table_selection === selectionKey && ['new', 'in_progress', 'done'].includes(o.status));
+                                                    const preOrders = orders.filter(o => o.table_selection === selectionKey && o.status === 'preorder');
+                                                    const activeCount = activeOrders.length;
+                                                    const reservedCount = preOrders.length;
+                                                    const isOccupied = activeCount > 0;
+                                                    const isReserved = !isOccupied && reservedCount > 0;
+                                                    const status = isOccupied ? `Occupied (${activeCount})` : isReserved ? `Reserved (${reservedCount})` : 'Available';
+                                                    const customer = activeOrders[0]?.customer_name ?? preOrders[0]?.customer_name;
+
                                                     return (
                                                         <option 
                                                             key={`${slot.id}-${table.id}`} 
                                                             value={selectionKey}
-                                                            disabled={isUnavailable}
                                                             style={{
-                                                                backgroundColor: isOccupied ? '#fee2e2' : (isReserved ? '#fef3c7' : '#dcfce7'),
-                                                                color: isOccupied ? '#991b1b' : (isReserved ? '#92400e' : '#166534')
+                                                                backgroundColor: isOccupied ? '#fee2e2' : isReserved ? '#fef3c7' : '#dcfce7',
+                                                                color: isOccupied ? '#991b1b' : isReserved ? '#92400e' : '#166534'
                                                             }}
                                                         >
                                                             {selectionKey} ({status}){customer ? ` — ${customer}` : ''}
@@ -1655,8 +1651,11 @@ function TableStatusManagement() {
     const [orders, setOrders] = React.useState([]);
     const [isLoading, setIsLoading] = React.useState(true);
     const [isClearing, setIsClearing] = React.useState(null);
+    const [isClearingTableSelection, setIsClearingTableSelection] = React.useState(false);
     const [clearingOrderInfo, setClearingOrderInfo] = React.useState(null);
+    const [clearingTableSelectionInfo, setClearingTableSelectionInfo] = React.useState(null);
     const [selectedOrderDetails, setSelectedOrderDetails] = React.useState(null);
+    const [selectedTableOrders, setSelectedTableOrders] = React.useState(null);
     const [isSavingNote, setIsSavingNote] = React.useState(false);
     const [isSendingToKitchen, setIsSendingToKitchen] = React.useState(false);
     const [editingNote, setEditingNote] = React.useState('');
@@ -1699,6 +1698,40 @@ function TableStatusManagement() {
             alert('Failed to clear table. Please try again.');
         } finally {
             setIsClearing(null);
+        }
+    }
+
+    async function clearTableSelection(tableSelection) {
+        if (!tableSelection) return;
+        const activeOrders = orders.filter(o => o.table_selection === tableSelection && ['new', 'in_progress', 'done'].includes(o.status));
+        if (activeOrders.length === 0) return;
+
+        setClearingTableSelectionInfo({
+            tableSelection,
+            orders: activeOrders,
+            tableNum: activeOrders[0]?.table_selection?.split('| Table ')[1] || '—',
+            customers: [...new Set(activeOrders.map(o => o.customer_name || `Order #${o.id}`))].join(', '),
+        });
+    }
+
+    async function confirmClearTableSelection() {
+        if (!clearingTableSelectionInfo) return;
+        setIsClearingTableSelection(true);
+
+        try {
+            for (const order of clearingTableSelectionInfo.orders) {
+                await window.axios.patch(`/api/orders/${order.id}/status`, {
+                    status: 'completed',
+                });
+            }
+            setOrders(prev => prev.filter(o => !clearingTableSelectionInfo.orders.some(co => co.id === o.id)));
+            setSelectedTableOrders(null);
+            setClearingTableSelectionInfo(null);
+        } catch (e) {
+            console.error('Failed to clear table selection', e);
+            alert('Failed to clear table. Please try again.');
+        } finally {
+            setIsClearingTableSelection(false);
         }
     }
 
@@ -1791,36 +1824,31 @@ function TableStatusManagement() {
             ...slot,
             tables: slot.tables.map(table => {
                 const selectionKey = `${slot.shortLabel} | Table ${table.id}`;
-                const activeOrder = orders.find(o => o.table_selection === selectionKey && (o.status === 'new' || o.status === 'in_progress' || o.status === 'done'));
-                const preOrder = orders.find(o => o.table_selection === selectionKey && o.status === 'preorder');
-                
-                let status = 'Available';
-                let customer = null;
-                let orderId = null;
-                let orderKitchenStatus = null;
-                let fullOrder = null;
+                    const activeOrders = orders.filter(o => o.table_selection === selectionKey && ['new', 'in_progress', 'done'].includes(o.status));
+                const preOrders = orders.filter(o => o.table_selection === selectionKey && o.status === 'preorder');
+                const activeCount = activeOrders.length;
+                const reservedCount = preOrders.length;
+                const fullOrders = activeOrders.length ? activeOrders : preOrders;
+                const statusType = activeCount > 0 ? 'Occupied' : reservedCount > 0 ? 'Reserved' : 'Available';
+                const statusLabel = activeCount > 0
+                    ? `Occupied${activeCount > 1 ? ` (${activeCount})` : ''}`
+                    : reservedCount > 0
+                        ? `Reserved${reservedCount > 1 ? ` (${reservedCount})` : ''}`
+                        : 'Available';
+                const customerNames = fullOrders.map((o) => o.customer_name?.trim() || `Order #${o.id}`);
+                const customer = [...new Set(customerNames)].join(', ');
+                const orderId = fullOrders[0]?.id ?? null;
+                const orderKitchenStatus = fullOrders[0]?.status ?? null;
 
-                if (activeOrder) {
-                    status = 'Occupied';
-                    customer = activeOrder.customer_name;
-                    orderId = activeOrder.id;
-                    orderKitchenStatus = activeOrder.status; // 'new', 'in_progress', or 'done'
-                    fullOrder = activeOrder;
-                } else if (preOrder) {
-                    status = 'Reserved';
-                    customer = preOrder.customer_name;
-                    orderId = preOrder.id;
-                    orderKitchenStatus = 'preorder';
-                    fullOrder = preOrder;
-                }
-                
                 return {
                     ...table,
-                    status,
+                    status: statusType,
+                    statusLabel,
+                    statusType,
                     customer,
                     orderId,
                     orderKitchenStatus,
-                    fullOrder
+                    fullOrders,
                 };
             })
         }));
@@ -1887,9 +1915,17 @@ function TableStatusManagement() {
                         <button
                             key={table.id}
                             onClick={() => {
-                                if (table.fullOrder) {
-                                    setSelectedOrderDetails(table.fullOrder);
-                                    setEditingNote(table.fullOrder.note || '');
+                                if (table.fullOrders?.length > 1) {
+                                    setSelectedTableOrders({
+                                        tableId: table.id,
+                                        tableSelection: table.fullOrders[0]?.table_selection || `${slot.shortLabel} | Table ${table.id}`,
+                                        statusType: table.statusType,
+                                        orders: table.fullOrders,
+                                    });
+                                } else if (table.fullOrders?.length === 1) {
+                                    setSelectedOrderDetails(table.fullOrders[0]);
+                                    setEditingNote(table.fullOrders[0].note || '');
+                                    setSelectedTableOrders(null);
                                 } else {
                                     setOccupyTableTarget({ slot, table });
                                 }
@@ -1917,7 +1953,7 @@ function TableStatusManagement() {
                                     isReserved ? 'bg-amber-50 text-amber-600 border border-amber-100' :
                                     'bg-emerald-500 text-white shadow-emerald-100'
                                 }`}>
-                                    {table.status}
+                                    {table.statusLabel}
                                 </div>
                             </div>
 
@@ -1963,7 +1999,7 @@ function TableStatusManagement() {
                                         <p className={`text-[11px] font-bold text-left truncate tracking-tight ${
                                             isOccupied ? 'text-slate-600' : isReserved ? 'text-slate-600' : 'text-emerald-600'
                                         }`}>
-                                            {isOccupied ? `Customer: ${table.customer}` : isReserved ? `Reserved: ${table.customer}` : 'Tap to occupy table'}
+                                            {isOccupied ? `${table.fullOrders?.length > 1 ? 'Customers' : 'Customer'}: ${table.customer}` : isReserved ? `Reserved: ${table.customer}` : 'Tap to occupy table'}
                                         </p>
                                     </div>
 
@@ -1972,17 +2008,26 @@ function TableStatusManagement() {
                                             type="button"
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                setClearingOrderInfo({
-                                                    id: table.orderId,
-                                                    tableNum: table.id,
-                                                    customer: table.customer,
-                                                    orderKitchenStatus: table.orderKitchenStatus,
-                                                });
+                                                if (table.fullOrders?.length > 1) {
+                                                    setSelectedTableOrders({
+                                                        tableId: table.id,
+                                                        tableSelection: table.fullOrders[0]?.table_selection || `${slot.shortLabel} | Table ${table.id}`,
+                                                        statusType: table.statusType,
+                                                        orders: table.fullOrders,
+                                                    });
+                                                } else {
+                                                    setClearingOrderInfo({
+                                                        id: table.orderId,
+                                                        tableNum: table.id,
+                                                        customer: table.customer,
+                                                        orderKitchenStatus: table.orderKitchenStatus,
+                                                    });
+                                                }
                                             }}
-                                            disabled={isClearing === table.orderId}
+                                            disabled={table.fullOrders?.length === 1 ? isClearing === table.orderId : false}
                                             className="flex-none bg-rose-500 text-white text-[9px] font-black uppercase px-2 py-1 rounded-lg shadow-sm hover:bg-rose-600 active:scale-95 transition-all disabled:opacity-50"
                                         >
-                                            {isClearing === table.orderId ? '...' : 'Clear Table'}
+                                            {table.fullOrders?.length > 1 ? 'View Orders' : isClearing === table.orderId ? '...' : 'Clear Table'}
                                         </button>
                                     )}
                                 </div>
@@ -2054,6 +2099,57 @@ function TableStatusManagement() {
                 </div>
             )}
 
+            {/* Clear Table Selection Confirmation Modal */}
+            {clearingTableSelectionInfo && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center gap-4 mb-6">
+                            <div className="h-12 w-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-6 h-6">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800 tracking-tight">Clear Table {clearingTableSelectionInfo.tableNum}?</h3>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Confirm Table Availability</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 rounded-2xl p-4 mb-8 border border-slate-100">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Customers</span>
+                                <span className="text-sm font-bold text-slate-700">{clearingTableSelectionInfo.customers}</span>
+                            </div>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Orders</span>
+                                <span className="text-sm font-bold text-slate-700">{clearingTableSelectionInfo.orders.length}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 leading-relaxed font-medium">
+                                This will complete all active orders on this table and mark it as available.
+                            </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setClearingTableSelectionInfo(null)}
+                                className="flex-1 px-6 py-3 rounded-2xl border border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50 active:scale-95 transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => confirmClearTableSelection()}
+                                disabled={isClearingTableSelection}
+                                className="flex-1 px-6 py-3 rounded-2xl bg-rose-500 text-white text-sm font-bold hover:bg-rose-600 active:scale-95 transition-all shadow-lg shadow-rose-200 disabled:opacity-50"
+                            >
+                                {isClearingTableSelection ? '...' : 'Clear Table'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Occupy Table Modal */}
             {occupyTableTarget && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -2117,6 +2213,81 @@ function TableStatusManagement() {
             )}
 
             {/* Order Details & Note Modal */}
+            {selectedTableOrders && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] p-8 max-w-2xl w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="flex items-center justify-between mb-6">
+                            <div>
+                                <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                                    {selectedTableOrders.statusType === 'Reserved' ? 'Reserved Orders' : 'Table Orders'}
+                                </h3>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                    {selectedTableOrders.tableSelection}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedTableOrders(null)}
+                                className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-900 transition"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                            {selectedTableOrders.orders.map((order) => (
+                                <button
+                                    key={order.id}
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedOrderDetails(order);
+                                        setEditingNote(order.note || '');
+                                        setSelectedTableOrders(null);
+                                    }}
+                                    className="w-full text-left rounded-3xl border border-slate-200 bg-slate-50 p-4 hover:border-emerald-300 hover:bg-white transition"
+                                >
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <div className="text-sm font-black text-slate-900">Order #{order.id}</div>
+                                            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-1">
+                                                {order.customer_name || `Order #${order.id}`} • {order.status.replace('_', ' ')}
+                                            </div>
+                                        </div>
+                                        <div className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase text-slate-500">
+                                            {order.items?.length ?? 0} items
+                                        </div>
+                                    </div>
+                                    {order.items?.slice(0, 3).map((item) => (
+                                        <div key={item.id} className="mt-3 rounded-2xl bg-white p-3 text-[12px] text-slate-600 border border-slate-100">
+                                            {item.product?.name} x{item.quantity}
+                                        </div>
+                                    ))}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="mt-6 flex justify-end gap-3">
+                            {selectedTableOrders.statusType === 'Occupied' && (
+                                <button
+                                    type="button"
+                                    onClick={() => clearTableSelection(selectedTableOrders.tableSelection)}
+                                    className="rounded-2xl bg-rose-500 px-5 py-3 text-sm font-bold text-white hover:bg-rose-600 active:scale-95 transition"
+                                >
+                                    Clear Table
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setSelectedTableOrders(null)}
+                                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 hover:bg-slate-50 transition"
+                            >
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {selectedOrderDetails && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white rounded-[2.5rem] p-8 max-w-lg w-full shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col">
